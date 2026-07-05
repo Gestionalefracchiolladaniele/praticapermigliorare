@@ -1,0 +1,46 @@
+formazioni sull’offerta di lavoro
+Job Title: AI Engineer (roles from Lead, Senior and Junior)
+Location: Abu Dhabi (Relocation is required)
+
+Salary: €85,000 - €115,000 (Tax Free + amazing Relocation benefits and healthcare + 40 days holiday including Public holidays + Free Lunch
+
+
+My client is evolving and looking for talent with a deep understanding of Large Language Models (LLMs), Vision-Language Models (VLMs) and agentic model architectures. The ideal candidate will have strong foundation in both research and engineering, with hands on experience developing, fine tuning and deploying AI systems.
+
+
+The candidate will contribute to building scalable, production ready AI applications, integrating multimodal reasoning, and pushing the boundaries of autonomous intelligent agents.
+
+
+Key Responsibilities 
+
+Design, train, fine-tune, and optimize LLMs and VLMs for real-world
+Develop and orchestrate autonomous agent frameworks capable of multi-step reasoning, planning, and tool use.
+Build scalable, low-latency inference systems for large models using frameworks like DeepSpeed, vLLM, TensorRT, or ONNX Runtime.
+Implement distributed training, model parallelism, and efficient inference pipelines; also optimize deployment for edge devices, GPUs, and cloud-based platforms.
+Research & Innovation: Stay up to date with the latest advancements in LLMs, multimodal models, and autonomous agents.
+
+
+Key Skills 
+
+Strong understanding of LLMs, VLMs, transformers, and multimodal architectures.
+Experience with fine-tuning, LoRA/QLoRA, quantization, distillation, and evaluation.
+Knowledge of neurosymbolic methodology
+Knowledge of reinforcement learning (RLHF, RLAIF) and alignment techniques.
+Experience with frameworks such as LangChain, LlamaIndex, AutoGPT, CrewAI, OpenAI Agents, Hugging Face Transformers/Agents.
+Ability to design reasoning loops, memory systems, and multi-agent coordination.
+Proficient in PyTorch, TensorFlow, Hugging Face, OpenAI APIs, DeepSpeed, vLLM
+Knowledge with Weaviate, Pinecone, FAISS, Milvus (vector databases), Redis, Kafka.
+Knowledge with Weights & Biases, MLflow, TensorBoard, Evals frameworks.
+Python for AI research, prototyping, and deployment pipelines.
+C++for performance-critical components, model inference optimization, and system integration.
+Proficiency with Docker, and AI distributed training systems.
+Strong knowledge of CUDA, GPU optimization, and high-performance computing.
+Familiarity with cloud platforms (AWS, GCP, Azure) and edge deployment strategies.
+
+
+Qualifications
+
+Master’s, or PhD in Computer Science, AI/ML, Robotics, or related field.
+Proven track record of hands-on work with LLMs, VLMs, or agentic frameworks.
+Experience in productionizing AI systems at scale.
+Excellent communication and collaboration skills.

@@ -1,0 +1,85 @@
+Informazioni sull’offerta di lavoro
+We are seeking a highly motivated and technically proficient AI Engineer to join our growing Data & Analytics team. In this role, you will be a key liaison between business stakeholders and the technical AI team, translating complex business challenges into scalable artificial intelligence and machine learning solutions. You will be responsible for defining technical requirements, designing AI architectures (including Generative AI and RAG patterns), and collaborating with the Data Center of Excellence to deliver high-quality, production-ready AI tools that drive innovation and operational efficiency across the organization.
+
+
+
+
+AI Solution Scoping & Requirements:
+
+Elicit and document technical requirements for AI and Machine Learning projects through workshops and deep dives with stakeholders across various departments.
+Define the technical feasibility of proposed AI use cases, identifying appropriate model architectures (LLMs, SLMs, or traditional ML) and success metrics (Accuracy, F1-score, Perplexity, etc.).
+Analyze existing business processes to identify automation opportunities and areas where Generative AI can provide a competitive advantage.
+
+
+Data Engineering & AI Pipeline Design:
+
+Work with stakeholders to identify and prepare high-quality datasets for model training, fine-tuning, and grounding.
+Design and implement data ingestion pipelines for vector databases, ensuring data integrity and optimal embedding strategies for Retrieval-Augmented Generation (RAG).
+Collaborate with data engineers to ensure scalable, secure, and compliant data flows between enterprise systems and AI models.
+
+
+Model Development & Orchestration:
+
+Develop, test, and refine AI prompts and orchestration workflows using frameworks like LangChain, LlamaIndex, or Semantic Kernel.
+Evaluate and select appropriate foundation models (OpenAI, Anthropic, Llama, etc.) based on performance, cost, and latency requirements.
+Translate business logic into technical specifications for API integrations, model endpoints, and user interfaces.
+
+
+MLOps, Deployment & Monitoring:
+
+Implement MLOps best practices to ensure the continuous integration and deployment (CI/CD) of AI models.
+Establish monitoring frameworks to track model performance, "drift," and hallucination rates in production environments.
+Ensure AI solutions adhere to corporate data governance, security, and ethical AI principles.
+
+
+Knowledge/Skills/Competencies
+
+
+Essential Skills:
+11+ years of experience in Information Technology, Software Engineering, or Data Science, with a significant focus on AI/ML development.
+Strong understanding of Generative AI landscapes, including LLMs, prompt engineering, and vector databases (e.g., Pinecone, Weaviate, Milvus).
+Proven ability to architect end-to-end AI solutions from discovery to production deployment.
+Excellent communication skills, with the ability to explain complex technical AI concepts to non-technical business leaders.
+Advanced proficiency in Python and relevant libraries (NumPy, Pandas, PyTorch, or TensorFlow).
+Experience with Cloud AI Services (Azure AI Studio, AWS Bedrock, or Google Vertex AI [Preferred]).
+Desirable Skills:
+Knowledge of SQL and advanced data modeling for structured and unstructured data.
+Familiarity with MLOps tools (MLflow, Kubeflow) and containerization (Docker, Kubernetes).
+Experience working in an Agile/Scrum development environment.
+Knowledge of AI security frameworks and responsible AI practices (e.g., OWASP for LLMs, MCP).
+Industry experience in manufacturing or a related industrial sector.
+
+
+Physical Demands
+Duties of this position are performed in a normal office environment.
+Duties may require extended periods of sitting and sustained visual concentration on a computer monitor or on numbers and other detailed data. Repetitive manual movements (e.g., data entry, using a computer mouse, using a calculator, etc.) are frequently required.
+
+
+Typical Experience
+11+ years of progressive experience in technical roles, with at least 3-5 years specifically focused on AI/ML engineering or architecture.
+Proven track record of delivering production-grade AI applications.
+AI-related certifications (e.g., Azure AI Engineer Associate, AWS Machine Learning Specialty) are highly preferred.
+
+
+Typical Education
+Bachelor’s or Master’s degree in Computer Science, Artificial Intelligence, Data Science, Mathematics, or a related field; or a robust combination of work experience and specialized AI certification.
+
+
+Notes
+This job description is not intended to be an exhaustive list of all duties and responsibilities of the position. Employees are held accountable for all duties of the job. Job duties and the % of time identified for any function are subject to change at any time.
+Celestica is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, sexual orientation, gender identity, national origin, age, pregnancy, genetic information, disability, status as a protected veteran, or any other protected category under applicable federal, state, and local laws. 
+
+This policy applies to hiring, promotion, discharge, pay, fringe benefits, job training, classification, referral and other aspects of employment and also states that retaliation against a person who files a charge of discrimination, participates in a discrimination proceeding, or otherwise opposes an unlawful employment practice will not be tolerated. All information will be kept confidential according to EEO guidelines.
+Celestica is an E-Verify employer.
+ 
+Location: This is a remote position, with travel as necessary. We are open to considering candidates close to any of our US locations in Massachusetts, Pennsylvania, Minnesota, Texas, Arizona, Oregon or California as well as locations near major airports such as the Northeast, Southeast, Midwest and Pacific Coast.
+ 
+COMPANY OVERVIEW:
+
+Celestica (NYSE, TSX: CLS) enables the world’s best brands. Through our recognized customer-centric approach, we partner with leading companies in Aerospace and Defense, Communications, Enterprise, HealthTech, Industrial, Capital Equipment and Energy to deliver solutions for their most complex challenges. As a leader in design, manufacturing, hardware platform and supply chain solutions, Celestica brings global expertise and insight at every stage of product development – from drawing board to full-scale production and after-market services for products from advanced medical devices, to highly engineered aviation systems, to next-generation hardware platform solutions for the Cloud. Headquartered in Toronto, with talented teams spanning 40+ locations in 13 countries across the Americas, Europe and Asia, we imagine, develop and deliver a better future with our customers.
+ 
+Celestica would like to thank all applicants, however, only qualified applicants will be contacted.
+Celestica does not accept unsolicited resumes from recruitment agencies or fee based recruitment services.
+
+
+Job Segment: Test Engineer, Testing, Data Center, Data Entry, Cloud, Engineering, Technology, Administrative
