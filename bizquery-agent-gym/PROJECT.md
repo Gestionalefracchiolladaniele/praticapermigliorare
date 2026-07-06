@@ -161,8 +161,32 @@ e i tool girano anche come server MCP indipendente.
 
 ## Stato avanzamento
 
-- 🟡 **Livello 1 (v0)** — in corso. Prossimo micro-step: schema SQL + seed data
-  (step 1 del piano v0).
+- 🟡 **Livello 1 (v0)** — in corso. Tutto il codice v0 scritto e testato offline
+  (**21 test verdi + 4 skip** che attendono il DB). Manca solo l'esecuzione live
+  (serve un Postgres reale).
+  - ✅ Step 1: `app/db/schema.sql` (3 tabelle + RLS multi-tenant), `app/db/seed.py`
+    (seed=42 riproducibile). Verifica contro DB reale attende Postgres.
+  - ✅ Step 2: `app/main.py` (`POST /ask`), `app/llm/gemini_client.py`. Catena
+    domanda→SQL→guardrail→risposta testata con Gemini mockato (`tests/test_ask_endpoint.py`, 3 test).
+  - ✅ Step 3: `app/guardrail.py` + `tests/test_guardrail.py` (12 test: read-only,
+    anti-injection, filtro tenant, falsi positivi).
+  - ✅ Step 4 (codice pronto): esecuzione in `main.py` via `app/db/client.py`
+    (`tenant_session` con SET LOCAL) + **formattazione risposta in NL**
+    `app/answer.py` (`tests/test_answer.py`, 6 test). Esecuzione live attende Postgres.
+  - ✅ Step 5 (scritto): `eval/dataset.json` (10 casi, valori attesi calcolati
+    dal seed deterministico) + `eval/eval.py` (execution accuracy, output JSON).
+  - ✅ Step 6 (scritto): `Dockerfile`, `docker-compose.yml` (app + Postgres 16,
+    healthcheck, schema auto-applicato al boot). `docker compose config` valida.
+  - ✅ Step 7 (scritto): `DEPLOY_AWS.md` (EC2 t3.micro + docker compose, free tier
+    reale; scelta motivata vs ECS/RDS).
+  - ✅ Test isolamento RLS: `tests/test_rls_isolation.py` (4 test, il più importante
+    di v0: tenant 1 non vede i dati di tenant 2). Si skippa senza DB, gira col DB su.
+  - Scaffold: `requirements.txt`, `.env.example`, `.gitignore`, `README.md`.
+  - 📖 Prep Livello 2 (senza iniziarlo): `LANGGRAPH_NOTES.md` — convenzioni
+    LangGraph verificate su doc ufficiale, mappate sul nostro grafo.
+  - 🔒 **Prossimo blocco: un Postgres reale su localhost:5432** (via Docker una
+    volta risolto lo spazio, oppure Postgres nativo). Poi: `docker compose up`
+    → `seed` → `/ask` dal vivo → `python -m eval.eval` → i 4 test RLS diventano verdi.
 - ⬜ Livello 2 (v1) — non iniziato, in attesa che v0 sia FATTO.
 - ⬜ Livello 3 (v2) — non iniziato.
 
@@ -176,12 +200,18 @@ e i tool girano anche come server MCP indipendente.
   Windows) in questo terminale Bash, non come `python` (alias Store attivo).
   Dentro un venv attivato `python` funzionerà normalmente — non è un problema
   per il progetto, va solo saputo per i comandi da terminale grezzi.
-- **Docker Desktop**: NON installato — da installare prima dello step 6
-  (containerizzazione), ma serve subito per Postgres locale (step 1). Verificato 2026-07-05.
-- **Postgres per v0**: locale via Docker, container dedicato isolato dagli
-  altri progetti. Deciso 2026-07-05.
-- **Gemini API key**: da ottenere su Google AI Studio (free tier), salvata in
-  `.env` (mai committata — `.gitignore` da subito).
+- **Docker Desktop**: CLI installata (docker 29.6.1) e distro WSL2 presente, ma
+  il **daemon non risponde** (verificato 2026-07-06: `docker info` va in timeout).
+  **Ostacolo reale scoperto il 2026-07-06: il disco C: è pieno (0–0.2 GB liberi)**,
+  e lo storage Docker (`docker_data.vhdx`, ~1.1 GB) è ancora su C:. Va spostato su
+  F: (464 GB liberi) prima di poter buildare. Il `docker-compose.yml` è scritto e
+  `docker compose config` lo valida; manca solo un Postgres reale in ascolto.
+- **Postgres per v0**: locale via Docker (deciso 2026-07-05). Alternativa emersa
+  se lo spazio Docker resta bloccato: Postgres nativo su F:. Qualunque Postgres in
+  ascolto su `localhost:5432` sblocca gli step 4-5.
+- **Gemini**: modello `gemini-2.5-flash-lite` (deciso 2026-07-06), free tier.
+  API key su Google AI Studio, salvata in `.env` (mai committata — `.gitignore`).
+  ⚠️ La chiave attuale è comparsa nella chat di sviluppo: va rigenerata.
 - **Gestione pacchetti Python**: `venv` + `pip` (coerente con quanto già usa
   l'utente in altri progetti Python, vedi `user-profile`).
 

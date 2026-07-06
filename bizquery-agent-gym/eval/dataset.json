@@ -1,0 +1,67 @@
+{
+  "_note": "Valori attesi calcolati dal seed deterministico (seed=42). Se cambia seed.py o schema.sql, ricalcolare. Ogni caso: domanda NL + tenant + risultato scalare atteso. tolerance opzionale per confronti float.",
+  "cases": [
+    {
+      "id": "t1_num_customers",
+      "tenant_id": 1,
+      "question": "Quanti clienti abbiamo in totale?",
+      "expected": 15
+    },
+    {
+      "id": "t1_num_orders",
+      "tenant_id": 1,
+      "question": "Quanti ordini abbiamo in totale?",
+      "expected": 55
+    },
+    {
+      "id": "t1_num_paid_orders",
+      "tenant_id": 1,
+      "question": "Quanti ordini pagati (status 'paid') abbiamo?",
+      "expected": 27
+    },
+    {
+      "id": "t1_revenue_paid",
+      "tenant_id": 1,
+      "question": "Qual e' il fatturato totale degli ordini pagati?",
+      "expected": 68786.45,
+      "tolerance": 0.01
+    },
+    {
+      "id": "t1_customers_italy",
+      "tenant_id": 1,
+      "question": "Quanti clienti abbiamo in Italia?",
+      "expected": 6
+    },
+    {
+      "id": "t2_num_customers",
+      "tenant_id": 2,
+      "question": "Quanti clienti abbiamo in totale?",
+      "expected": 15
+    },
+    {
+      "id": "t2_num_orders",
+      "tenant_id": 2,
+      "question": "Quanti ordini abbiamo in totale?",
+      "expected": 45
+    },
+    {
+      "id": "t2_num_paid_orders",
+      "tenant_id": 2,
+      "question": "Quanti ordini pagati (status 'paid') abbiamo?",
+      "expected": 17
+    },
+    {
+      "id": "t2_revenue_paid",
+      "tenant_id": 2,
+      "question": "Qual e' il fatturato totale degli ordini pagati?",
+      "expected": 33642.29,
+      "tolerance": 0.01
+    },
+    {
+      "id": "t2_customers_italy",
+      "tenant_id": 2,
+      "question": "Quanti clienti abbiamo in Italia?",
+      "expected": 2
+    }
+  ]
+}
