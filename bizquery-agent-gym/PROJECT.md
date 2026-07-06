@@ -187,8 +187,27 @@ e i tool girano anche come server MCP indipendente.
   - 🔒 **Prossimo blocco: un Postgres reale su localhost:5432** (via Docker una
     volta risolto lo spazio, oppure Postgres nativo). Poi: `docker compose up`
     → `seed` → `/ask` dal vivo → `python -m eval.eval` → i 4 test RLS diventano verdi.
-- ⬜ Livello 2 (v1) — non iniziato, in attesa che v0 sia FATTO.
-- ⬜ Livello 3 (v2) — non iniziato.
+- 🟡 **Livello 2 (v1)** — anticipati i pezzi costruibili/testabili senza DB live
+  (nodi mockati). Da riverificare col DB reale quando v0 gira dal vivo.
+  - ✅ Model router `app/llm/router.py` (Flash vs Pro deterministico su segnali di
+    complessità) + `tests/test_router.py` (7 test).
+  - ✅ Grafo LangGraph (langgraph 1.2.7): `app/graph/state.py` (AgentState Pydantic),
+    `app/graph/nodes.py` (nodi che avvolgono le funzioni v0), `app/graph/build_graph.py`
+    (planner→router→sql_executor→guardrail→db_executor→reviewer→answer + **retry loop**).
+    `tests/test_graph.py` (4 test, retry loop dimostrato = criterio "v1 FATTO", mockato).
+  - ✅ Demo visiva `demo_graph.py`: mostra il flusso nodo per nodo senza DB/API
+    (router, retry, guardrail block). Gira con `python demo_graph.py`.
+  - ⬜ Manca (richiede DB/servizi live): Langfuse (tracing), CI/CD, e la verifica
+    del grafo end-to-end con Gemini e Postgres veri.
+- 🟡 **Livello 3 (v2)** — anticipata la struttura dei tool come MCP.
+  - ✅ Tool estratti: `app/tools/run_query.py` (ri-valida col guardrail + esegue in
+    RLS), `app/tools/mask_pii.py` (maschera email, PII), `app/tools/send_notification.py`
+    (stub locale). `tests/test_tools.py` (5 test).
+  - ✅ Server MCP `app/mcp_server/server.py` (mcp 1.28.1, FastMCP): espone
+    run_query/mask_email/send_notification. Verificato che registra i 3 tool.
+  - ⬜ Manca: guardrail avanzati + human-in-the-loop (interrupt/resume), PII masking
+    nel flusso, data flywheel, SQL avanzato nell'eval. E l'esecuzione MCP live (run_query
+    richiede DB).
 
 ---
 
