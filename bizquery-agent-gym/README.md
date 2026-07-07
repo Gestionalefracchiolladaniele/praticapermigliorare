@@ -1,101 +1,135 @@
 # BizQuery — Copilot BI agentico (palestra AI Engineer)
 
-Piano completo e visione a regime in [PROJECT.md](PROJECT.md). Si costruisce a
-livelli incrementali. **v0 (Livello 1) è code-complete**; pezzi di **Livello 2/3**
-già anticipati dove testabili senza DB live.
+Piano completo e visione a regime in [PROJECT.md](PROJECT.md). Costruito a livelli
+incrementali. **Tutto il codice applicativo dei 3 livelli è scritto e gira dal
+vivo in Docker** (Gemini + Postgres reali). Restano solo observability (Langfuse),
+CI/CD e il deploy AWS.
 
-## Stato
+Un utente business fa una domanda in italiano sui dati aziendali; un agente
+(LangGraph) la traduce in SQL, la valida (guardrail + RLS multi-tenant), la
+esegue, e risponde — con human-in-the-loop sulle query rischiose, PII mascherate,
+e ogni run loggata per migliorare i few-shot nel tempo (data flywheel).
 
-**Livello 1 (v0)** — step del piano:
+## Stato — 47 test verdi, tutto verificato dal vivo (2026-07-07)
+
+**Livello 1 (v0)** — 🟢 FATTO dal vivo:
 
 | # | Step | Stato |
 |---|------|-------|
-| 1 | Schema SQL (RLS) + seed | ✅ scritto (verifica DB attende Postgres) |
-| 2 | FastAPI + Gemini client (`POST /ask` → SQL) | ✅ scritto e testato (Gemini mockato) |
-| 3 | Guardrail hard-coded + unit test | ✅ 12 test verdi |
-| 4 | Esecuzione query contro DB reale + risposta NL | 🟡 codice pronto, attende Postgres |
-| 5 | Evaluation base | ✅ scritto (`eval/`), esecuzione attende DB |
-| 6 | Docker (app + Postgres) | ✅ `Dockerfile` + `docker-compose.yml` |
-| 7 | Deploy AWS free tier | ✅ note in `DEPLOY_AWS.md` |
+| 1 | Schema SQL (RLS) + seed | ✅ 30 customers, 100 orders, 2 tenant |
+| 2 | FastAPI + Gemini (`POST /ask` → SQL) | ✅ gira dal vivo |
+| 3 | Guardrail hard-coded (read-only, anti-injection, tenant) | ✅ |
+| 4 | Esecuzione contro DB reale + risposta NL | ✅ |
+| 5 | Evaluation (15 casi, execution accuracy) | ✅ gira |
+| 6 | Docker (app + Postgres 16) | ✅ builda e gira |
+| 7 | Deploy AWS free tier | ✅ note in `DEPLOY_AWS.md` (non ancora eseguito) |
+| + | Interfaccia web (casella domanda → risposta) | ✅ `GET /` |
 
-**Livello 2 (grafo agenti)** — anticipato, testato coi mock:
+**Livello 2 (grafo agenti)** — 🟢 grafo verificato dal vivo:
 - ✅ Model router (Flash/Pro deterministico) — `app/llm/router.py`
-- ✅ Grafo LangGraph con **retry loop** — `app/graph/` — vedi **demo sotto**
-- ⬜ Langfuse, CI/CD, verifica end-to-end col DB reale
+- ✅ Grafo LangGraph con **retry loop** contro Postgres reale — `app/graph/`
+- ✅ Reviewer LLM (Gemini Flash valuta il risultato) + fallback deterministico
+- ✅ Endpoint `POST /ask-graph` (stesso lavoro di `/ask` ma via grafo)
+- ⬜ Langfuse (tracing), CI/CD
 
-**Livello 3 (tool come MCP)** — anticipato:
-- ✅ Tool `run_query` / `mask_pii` / `send_notification` + server MCP — `app/tools/`, `app/mcp_server/`
-- ⬜ Human-in-the-loop (interrupt), data flywheel, SQL avanzato
+**Livello 3 (guardrail avanzati, MCP, flywheel)** — 🟢 code-complete:
+- ✅ Tool `run_query` / `mask_pii` / `send_notification` + server MCP
+- ✅ **Human-in-the-loop**: `SELECT *` rischioso → grafo sospeso (`interrupt`) →
+  `POST /approve` riprende (checkpointer LangGraph)
+- ✅ **PII masking nel flusso**: email offuscate in uscita (`f***@example.com`)
+- ✅ **Data flywheel**: `query_logs` (RLS) + logging di ogni run + few-shot dalle
+  run riuscite — `app/flywheel.py`
+- ✅ SQL avanzato nell'eval (group by, avg, count distinct, sum)
 
-**Test:** v0 21 verdi + 4 skip (RLS, attendono DB); L2/L3 16 verdi (router+grafo+tool).
-Modello: `gemini-2.5-flash-lite` (free tier).
+Modello: `gemini-2.5-flash-lite` (free tier, ~20 richieste/giorno per progetto).
 
-## Vedi il flusso agentico dal vivo (nessun DB/API richiesti)
+## Avvio (Docker)
 
 ```bash
-./.venv/Scripts/python demo_graph.py
-```
-Mostra il grafo nodo per nodo su 4 scenari: domanda semplice, domanda complessa
-(il router sceglie Pro), **retry loop** (primo tentativo vuoto → ritenta → ok),
-e query pericolosa bloccata dal guardrail. Gemini e DB sono simulati.
+# 1. .env con la tua GEMINI_API_KEY (da https://aistudio.google.com/apikey)
+cp .env.example .env    # poi valorizza GEMINI_API_KEY
 
-> **Sblocco esecuzione reale:** serve un Postgres su `localhost:5432` (via Docker,
-> ma il disco C: è pieno → spostare lo storage Docker su F:, vedi PROJECT.md).
-> Poi: `docker compose up` → `seed` → `/ask` → `eval.py` → i test RLS diventano verdi.
+# 2. avvia db + app
+docker compose up -d --build
+
+# 3. popola i dati (una volta)
+docker compose run --rm app python -m app.db.seed
+
+# 4. usa l'app
+#    - interfaccia web:  http://localhost:8000/
+#    - Swagger:          http://localhost:8000/docs
+#    - agente singolo:   POST /ask        {"tenant_id":1,"question":"..."}
+#    - grafo LangGraph:  POST /ask-graph  {"tenant_id":1,"question":"..."}
+#    - approva sospesa:  POST /approve    {"thread_id":"...","decision":"approve"}
+```
+
+Nota: lo `schema.sql` (tabelle + RLS + ruolo app + `query_logs`) è applicato
+automaticamente al primo boot del container Postgres. Il seed va lanciato a mano
+(è Python). Se cambi lo schema: `docker compose down -v` per ricreare il DB.
+
+## Girare i test
+
+```bash
+# tutti i test (mockati + live) — tests/ va montato: non è nell'immagine
+docker compose run --rm -v "$PWD/tests:/app/tests:ro" app \
+  python -m pytest tests/ -p no:cacheprovider -q
+```
+
+I test che richiedono il DB (`test_rls_isolation`, `test_graph_live`,
+`test_flywheel`) si skippano senza `DATABASE_URL`; girano verdi col DB su.
+
+## Evaluation
+
+```bash
+docker compose run --rm -v "$PWD/eval/results:/app/eval/results" app \
+  python -m eval.eval
+```
+
+Esegue i 15 casi di `eval/dataset.json`, misura l'execution accuracy, salva un
+JSON in `eval/results/`. (I fallimenti tipici sono i 429/503 del free tier Gemini,
+non errori di logica.)
 
 ## Struttura
 
 ```
 app/
-  main.py              # FastAPI: POST /ask → genera SQL → guardrail → esegue → risposta NL
-  guardrail.py         # regole deterministiche read-only + anti-injection
+  main.py              # FastAPI: GET / (UI), POST /ask, /ask-graph, /approve, /health
+  guardrail.py         # regole deterministiche: read-only, anti-injection, tenant,
+                       #   + verdetto needs_human (SELECT * senza LIMIT → human review)
   answer.py            # formatta il risultato in linguaggio naturale (IT)
+  flywheel.py          # [L3] log_run + successful_examples (data flywheel)
   db/
-    schema.sql         # 3 tabelle + RLS multi-tenant
+    schema.sql         # tabelle business + query_logs, RLS multi-tenant
     seed.py            # dati finti riproducibili (seed=42)
-    client.py          # sessione DB read-only con SET LOCAL app.tenant_id
+    client.py          # sessione DB con SET LOCAL app.tenant_id (RLS)
   llm/
-    gemini_client.py   # domanda NL + schema → SQL (gemini-2.5-flash-lite)
+    gemini_client.py   # generate_sql (con few-shot dal flywheel) + review_answer (reviewer LLM)
     router.py          # [L2] Flash vs Pro deterministico
   graph/               # [L2] grafo LangGraph
     state.py           #   AgentState (Pydantic)
-    nodes.py           #   nodi che avvolgono le funzioni v0
-    build_graph.py     #   assemblaggio + retry loop
-  tools/               # [L3] tool riutilizzabili
-    run_query.py       #   esegue SQL in RLS (ri-valida col guardrail)
+    nodes.py           #   nodi: planner→router→sql→guardrail→[human_review]→db→reviewer→answer→log
+    build_graph.py     #   assemblaggio + retry loop + checkpointer (human-in-the-loop)
+  tools/               # [L3] tool riutilizzabili (grafo + MCP)
+    run_query.py       #   esegue SQL in RLS (ri-valida col guardrail; bypass needs_human solo se umano-approvato)
     mask_pii.py        #   maschera email (PII)
     send_notification.py  # stub notifica
   mcp_server/
     server.py          # [L3] espone i tool come server MCP
 eval/
-  dataset.json         # 10 casi domanda→numero (attesi dal seed deterministico)
+  dataset.json         # 15 casi domanda→numero (attesi dal seed deterministico)
   eval.py              # execution accuracy, output JSON in eval/results/
-tests/                 # v0 + router + grafo + tool (mock); RLS skip senza DB
-demo_graph.py          # [L2] demo visiva del flusso del grafo (no DB/API)
+tests/                 # v0 + router + grafo + tool + flywheel (mock + live)
+demo_graph.py          # [L2] demo visiva del flusso del grafo, no DB/API (python demo_graph.py)
 Dockerfile             # immagine app (non-root)
 docker-compose.yml     # app + Postgres 16
-DEPLOY_AWS.md          # note deploy free tier
+DEPLOY_AWS.md          # note deploy free tier (EC2 t3.micro)
 LANGGRAPH_NOTES.md     # convenzioni LangGraph (verificate su langgraph 1.2.7)
 ```
 
-## Girare i test (nessun Docker richiesto)
+## Cosa resta (non più codice applicativo core)
 
-```bash
-py -m venv .venv
-./.venv/Scripts/python -m pip install -r requirements.txt
-./.venv/Scripts/python -m pytest -q
+- **Langfuse** (observability) — free tier Hobby gratuito; integrazione da scrivere.
+- **CI/CD** — GitHub Actions (build + test + deploy).
+- **Deploy AWS** — EC2 t3.micro free tier (richiede account AWS).
+- **Sicurezza** — rigenerare le API key Gemini usate in sviluppo.
 ```
-
-## Provare l'endpoint con Gemini reale
-
-1. Copia `.env.example` in `.env`, metti `GEMINI_API_KEY` (gratis su
-   https://aistudio.google.com/apikey). Lascia `DATABASE_URL` vuota per ora.
-2. Avvia: `./.venv/Scripts/python -m uvicorn app.main:app --reload`
-3. `POST http://localhost:8000/ask` con `{"tenant_id": 1, "question": "quanti clienti abbiamo?"}`
-   → ritorna l'SQL generato + verdetto guardrail (non eseguito: manca il DB).
-
-## Prossimo blocco: Docker
-
-Lo step 4 in poi richiede Postgres reale. Serve installare Docker Desktop, poi:
-`docker-compose.yml` (app + Postgres), applicare `schema.sql`, girare `seed.py`,
-e l'endpoint eseguirà davvero le query con RLS attiva.
