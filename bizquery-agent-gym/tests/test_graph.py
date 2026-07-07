@@ -8,11 +8,16 @@ Verifica l'ORCHESTRAZIONE (routing, retry, stop), non la qualità dell'SQL:
 """
 import app.graph.nodes as nodes
 from app.graph.build_graph import build_graph
+from langgraph.types import Command
 
 
 def _invoke(tenant_id=1, question="Quanti clienti?"):
     graph = build_graph()
-    return graph.invoke({"question": question, "tenant_id": tenant_id})
+    # Col checkpointer (aggiunto in L3 per l'human-in-the-loop) ogni run richiede
+    # un thread_id: uno diverso per test così sono isolati.
+    import uuid
+    cfg = {"configurable": {"thread_id": str(uuid.uuid4())}}
+    return graph.invoke({"question": question, "tenant_id": tenant_id}, cfg)
 
 
 def test_happy_path(monkeypatch):
@@ -22,7 +27,7 @@ def test_happy_path(monkeypatch):
     )
     # db_executor importa run_query localmente: patchiamo lì.
     import app.tools.run_query as rq
-    monkeypatch.setattr(rq, "run_query", lambda sql, t: [[15]])
+    monkeypatch.setattr(rq, "run_query", lambda sql, t, **kw: [[15]])
 
     out = _invoke()
     assert out["guardrail_verdict"] == "approved"
@@ -49,7 +54,7 @@ def test_retry_loop_then_success(monkeypatch):
     )
     calls = {"n": 0}
 
-    def fake_run_query(sql, t):
+    def fake_run_query(sql, t, **kw):
         calls["n"] += 1
         return [] if calls["n"] == 1 else [[55]]
 
@@ -63,6 +68,51 @@ def test_retry_loop_then_success(monkeypatch):
     assert "55" in out["final_answer"]
 
 
+def test_human_in_the_loop_approve(monkeypatch):
+    """Query rischiosa (SELECT righe senza LIMIT) -> guardrail needs_human ->
+    il grafo si SOSPENDE (interrupt). Con Command(resume='approve') riprende,
+    esegue e risponde. E' il criterio human-in-the-loop di L3."""
+    import uuid
+    # SQL lecito ma senza LIMIT su selezione di righe -> needs_human.
+    monkeypatch.setattr(
+        nodes, "generate_sql",
+        lambda q, t: "SELECT * FROM customers WHERE tenant_id = 1",
+    )
+    import app.tools.run_query as rq
+    monkeypatch.setattr(rq, "run_query", lambda sql, t, **kw: [[1], [2], [3]])
+
+    graph = build_graph()
+    cfg = {"configurable": {"thread_id": str(uuid.uuid4())}}
+    out = graph.invoke({"question": "elenca i clienti", "tenant_id": 1}, cfg)
+
+    # Si è fermato in attesa dell'umano: c'è un interrupt pendente, nessuna risposta.
+    assert out.get("__interrupt__")
+    assert out.get("final_answer") is None
+
+    # L'umano approva -> il grafo riprende ed esegue.
+    out2 = graph.invoke(Command(resume="approve"), cfg)
+    assert out2["guardrail_verdict"] == "approved"
+    assert out2["human_approved"] is True
+    assert out2["final_answer"] is not None
+
+
+def test_human_in_the_loop_reject(monkeypatch):
+    """Stessa sospensione, ma l'umano rifiuta -> il grafo si ferma senza eseguire."""
+    import uuid
+    monkeypatch.setattr(
+        nodes, "generate_sql",
+        lambda q, t: "SELECT * FROM customers WHERE tenant_id = 1",
+    )
+    graph = build_graph()
+    cfg = {"configurable": {"thread_id": str(uuid.uuid4())}}
+    graph.invoke({"question": "elenca i clienti", "tenant_id": 1}, cfg)
+
+    out2 = graph.invoke(Command(resume="reject"), cfg)
+    assert out2["guardrail_verdict"] == "rejected"
+    assert out2["human_approved"] is False
+    assert out2.get("final_answer") is None
+
+
 def test_retry_exhausted_stops(monkeypatch):
     # run_query dà sempre vuoto: dopo MAX_RETRY il grafo si ferma senza answer.
     monkeypatch.setattr(
@@ -70,7 +120,7 @@ def test_retry_exhausted_stops(monkeypatch):
         lambda q, t: "SELECT count(*) FROM orders WHERE tenant_id = 1",
     )
     import app.tools.run_query as rq
-    monkeypatch.setattr(rq, "run_query", lambda sql, t: [])
+    monkeypatch.setattr(rq, "run_query", lambda sql, t, **kw: [])
 
     out = _invoke()
     assert out["retry_count"] == nodes.MAX_RETRY

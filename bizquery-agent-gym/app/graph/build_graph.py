@@ -18,6 +18,7 @@ il checkpointer servirà solo quando aggiungeremo interrupt/human-in-the-loop (L
 """
 from __future__ import annotations
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
 
 from app.graph.state import AgentState
@@ -27,7 +28,16 @@ from app.graph import nodes
 def _route_after_guardrail(state: AgentState) -> str:
     if state.guardrail_verdict == "approved":
         return "db_executor"
+    if state.guardrail_verdict == "needs_human":
+        return "human_review"   # sospende (interrupt) e aspetta l'umano
     return END  # rejected → stop
+
+
+def _route_after_human(state: AgentState) -> str:
+    # Dopo la decisione umana: approvata → esegue; rifiutata → stop.
+    if state.guardrail_verdict == "approved":
+        return "db_executor"
+    return END
 
 
 def _route_after_reviewer(state: AgentState) -> str:
@@ -46,6 +56,7 @@ def build_graph():
     g.add_node("router", nodes.router_node)
     g.add_node("sql_executor", nodes.sql_executor_node)
     g.add_node("guardrail", nodes.guardrail_node)
+    g.add_node("human_review", nodes.human_review_node)
     g.add_node("db_executor", nodes.db_executor_node)
     g.add_node("reviewer", nodes.reviewer_node)
     g.add_node("answer", nodes.answer_node)
@@ -55,8 +66,26 @@ def build_graph():
     g.add_edge("router", "sql_executor")
     g.add_edge("sql_executor", "guardrail")
     g.add_conditional_edges("guardrail", _route_after_guardrail)
+    g.add_conditional_edges("human_review", _route_after_human)
     g.add_edge("db_executor", "reviewer")
     g.add_conditional_edges("reviewer", _route_after_reviewer)
     g.add_edge("answer", END)
 
-    return g.compile()
+    # Checkpointer: serve perché interrupt() (human_review) persista lo stato tra
+    # la sospensione e la ripresa. MemorySaver = in-process, ok per v0/single
+    # istanza; a regime (multi-worker) si userebbe un checkpointer su Postgres.
+    return g.compile(checkpointer=MemorySaver())
+
+
+# Singleton: /ask-graph e /approve DEVONO condividere lo stesso checkpointer
+# (MemorySaver in-process), altrimenti la ripresa non ritrova lo stato sospeso.
+# Un solo grafo compilato per processo. I test che vogliono isolamento usano
+# build_graph() direttamente.
+_GRAPH = None
+
+
+def get_graph():
+    global _GRAPH
+    if _GRAPH is None:
+        _GRAPH = build_graph()
+    return _GRAPH

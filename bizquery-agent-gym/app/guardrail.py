@@ -36,6 +36,12 @@ _FORBIDDEN_RE = re.compile(
 class Verdict:
     approved: bool
     reason: str  # vuoto se approved, altrimenti motivo del rifiuto
+    # Livello 3: oltre a approved/rejected, una query può essere LECITA ma
+    # RISCHIOSA (es. nessun LIMIT su una potenziale scansione ampia) → non si
+    # blocca né si esegue: si chiede a un umano. `needs_human=True` implica
+    # approved=False (non è passata liberamente) ma reason spiega che è
+    # sospesa, non rifiutata.
+    needs_human: bool = False
 
 
 def _strip_comments(sql: str) -> str:
@@ -84,5 +90,25 @@ def check_sql(sql: str) -> Verdict:
     # 'tenant_id' deve comparire nella query. Se manca, rifiuta.
     if "tenant_id" not in stmt.lower():
         return Verdict(False, "Query senza filtro tenant_id: rifiutata.")
+
+    # Livello 3 — needs_human: la query è sicura (read-only, single-statement,
+    # con tenant), ma potenzialmente RISCHIOSA. Caso mirato: `SELECT *` senza
+    # LIMIT — prende TUTTE le colonne (incluse eventuali PII) su TUTTE le righe.
+    # Non la blocchiamo (è lecita) ma chiediamo conferma umana. Selezioni di
+    # colonne specifiche, o con LIMIT, o aggregazioni passano senza intervento:
+    # la regola resta stretta per non disturbare le query normali.
+    low = stmt.lower()
+    selects_star = bool(re.search(r"select\s+\*", low))
+    has_limit = bool(re.search(r"\blimit\b", low))
+    # Se ovunque nella query c'è un'aggregazione (anche una CTE che fa SELECT *
+    # ma poi count(*)), il risultato finale è piccolo → non è il caso rischioso.
+    is_aggregate = bool(re.search(r"\b(count|sum|avg|min|max)\s*\(|\bgroup by\b", low))
+    if selects_star and not has_limit and not is_aggregate:
+        return Verdict(
+            False,
+            "SELECT * senza LIMIT: legge tutte le colonne (possibili PII) e tutte "
+            "le righe. Richiede approvazione umana.",
+            needs_human=True,
+        )
 
     return Verdict(True, "")

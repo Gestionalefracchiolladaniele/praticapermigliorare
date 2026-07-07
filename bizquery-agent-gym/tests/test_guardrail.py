@@ -61,10 +61,10 @@ def test_stacked_query_rejected():
 
 
 def test_comment_hidden_write_rejected():
-    # Prova a nascondere che manca il tenant e a iniettare via commento.
-    sql = "SELECT * FROM customers WHERE tenant_id = 1 -- ; DROP TABLE x"
-    # Questa specifica resta approvata (il DROP è commentato e rimosso),
-    # ma il tenant c'è: verifichiamo che almeno non esploda e sia coerente.
+    # Prova a nascondere un DROP via commento. Il commento va rimosso e la query
+    # resta una SELECT lecita. LIMIT per non incrociare la regola needs_human
+    # (SELECT * senza LIMIT): qui il focus è che il DROP commentato non passi.
+    sql = "SELECT * FROM customers WHERE tenant_id = 1 LIMIT 10 -- ; DROP TABLE x"
     assert check_sql(sql).approved
 
 

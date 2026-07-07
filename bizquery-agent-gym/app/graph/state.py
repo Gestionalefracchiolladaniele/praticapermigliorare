@@ -31,5 +31,6 @@ class AgentState(BaseModel):
     query_result: list | None = None
     review_verdict: str | None = None      # "ok" | "retry_needed"
     retry_count: int = 0
+    human_approved: bool | None = None     # esito revisione umana (L3), se avvenuta
     final_answer: str | None = None
     error: str | None = None               # se un nodo fallisce, si ferma con motivo

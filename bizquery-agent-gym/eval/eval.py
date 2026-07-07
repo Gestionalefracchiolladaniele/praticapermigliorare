@@ -90,17 +90,22 @@ def run() -> int:
         print(f"{mark}{r['id']:22} atteso={r['expected']!s:>10}  ottenuto={detail}")
     print(f"\nExecution accuracy: {passed}/{total} = {accuracy:.0%}")
 
-    RESULTS_DIR.mkdir(exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out = RESULTS_DIR / f"{ts}.json"
-    out.write_text(
-        json.dumps(
-            {"accuracy": accuracy, "passed": passed, "total": total, "results": results},
-            indent=2, ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    print(f"Salvato: {out}")
+    try:
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps(
+                {"accuracy": accuracy, "passed": passed, "total": total, "results": results},
+                indent=2, ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        print(f"Salvato: {out}")
+    except OSError as e:
+        # In container (utente non-root, FS immagine read-only) il salvataggio
+        # puo' fallire: il punteggio e' gia' stampato sopra, non e' fatale.
+        print(f"[warn] risultati non salvati su {out}: {e}")
 
     # exit code != 0 se non tutto verde: utile per CI (Livello 2).
     return 0 if passed == total else 1

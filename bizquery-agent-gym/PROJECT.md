@@ -161,53 +161,73 @@ e i tool girano anche come server MCP indipendente.
 
 ## Stato avanzamento
 
-- 🟡 **Livello 1 (v0)** — in corso. Tutto il codice v0 scritto e testato offline
-  (**21 test verdi + 4 skip** che attendono il DB). Manca solo l'esecuzione live
-  (serve un Postgres reale).
-  - ✅ Step 1: `app/db/schema.sql` (3 tabelle + RLS multi-tenant), `app/db/seed.py`
-    (seed=42 riproducibile). Verifica contro DB reale attende Postgres.
-  - ✅ Step 2: `app/main.py` (`POST /ask`), `app/llm/gemini_client.py`. Catena
-    domanda→SQL→guardrail→risposta testata con Gemini mockato (`tests/test_ask_endpoint.py`, 3 test).
-  - ✅ Step 3: `app/guardrail.py` + `tests/test_guardrail.py` (12 test: read-only,
-    anti-injection, filtro tenant, falsi positivi).
-  - ✅ Step 4 (codice pronto): esecuzione in `main.py` via `app/db/client.py`
-    (`tenant_session` con SET LOCAL) + **formattazione risposta in NL**
-    `app/answer.py` (`tests/test_answer.py`, 6 test). Esecuzione live attende Postgres.
-  - ✅ Step 5 (scritto): `eval/dataset.json` (10 casi, valori attesi calcolati
-    dal seed deterministico) + `eval/eval.py` (execution accuracy, output JSON).
-  - ✅ Step 6 (scritto): `Dockerfile`, `docker-compose.yml` (app + Postgres 16,
-    healthcheck, schema auto-applicato al boot). `docker compose config` valida.
-  - ✅ Step 7 (scritto): `DEPLOY_AWS.md` (EC2 t3.micro + docker compose, free tier
-    reale; scelta motivata vs ECS/RDS).
-  - ✅ Test isolamento RLS: `tests/test_rls_isolation.py` (4 test, il più importante
-    di v0: tenant 1 non vede i dati di tenant 2). Si skippa senza DB, gira col DB su.
-  - Scaffold: `requirements.txt`, `.env.example`, `.gitignore`, `README.md`.
-  - 📖 Prep Livello 2 (senza iniziarlo): `LANGGRAPH_NOTES.md` — convenzioni
-    LangGraph verificate su doc ufficiale, mappate sul nostro grafo.
-  - 🔒 **Prossimo blocco: un Postgres reale su localhost:5432** (via Docker una
-    volta risolto lo spazio, oppure Postgres nativo). Poi: `docker compose up`
-    → `seed` → `/ask` dal vivo → `python -m eval.eval` → i 4 test RLS diventano verdi.
-- 🟡 **Livello 2 (v1)** — anticipati i pezzi costruibili/testabili senza DB live
-  (nodi mockati). Da riverificare col DB reale quando v0 gira dal vivo.
-  - ✅ Model router `app/llm/router.py` (Flash vs Pro deterministico su segnali di
-    complessità) + `tests/test_router.py` (7 test).
-  - ✅ Grafo LangGraph (langgraph 1.2.7): `app/graph/state.py` (AgentState Pydantic),
-    `app/graph/nodes.py` (nodi che avvolgono le funzioni v0), `app/graph/build_graph.py`
-    (planner→router→sql_executor→guardrail→db_executor→reviewer→answer + **retry loop**).
-    `tests/test_graph.py` (4 test, retry loop dimostrato = criterio "v1 FATTO", mockato).
-  - ✅ Demo visiva `demo_graph.py`: mostra il flusso nodo per nodo senza DB/API
-    (router, retry, guardrail block). Gira con `python demo_graph.py`.
-  - ⬜ Manca (richiede DB/servizi live): Langfuse (tracing), CI/CD, e la verifica
-    del grafo end-to-end con Gemini e Postgres veri.
-- 🟡 **Livello 3 (v2)** — anticipata la struttura dei tool come MCP.
-  - ✅ Tool estratti: `app/tools/run_query.py` (ri-valida col guardrail + esegue in
-    RLS), `app/tools/mask_pii.py` (maschera email, PII), `app/tools/send_notification.py`
-    (stub locale). `tests/test_tools.py` (5 test).
+> **Aggiornamento 2026-07-07 — sessione "tutto dal vivo in Docker".** Docker
+> sbloccato e l'intero stack gira davvero (Postgres 16 + app FastAPI in
+> container). v0 verificato end-to-end dal vivo; L2 (grafo) e gran parte del
+> codice L3 (human-in-the-loop, PII masking) scritti e verificati con Gemini +
+> Postgres reali. **44 test verdi** nel container. Dettagli per livello sotto.
+
+- 🟢 **Livello 1 (v0)** — **FATTO e verificato dal vivo (2026-07-07)**. L'app
+  gira in Docker, il DB è popolato, `/ask` risponde su dati reali con guardrail.
+  - ✅ Step 1: `app/db/schema.sql` (3 tabelle + RLS multi-tenant), `app/db/seed.py`.
+    **Seed live: 30 customers, 100 orders, 2 tenant** (`docker compose run --rm app python -m app.db.seed`).
+  - ✅ Step 2: `app/main.py` (`POST /ask`), `app/llm/gemini_client.py`. **Testato
+    dal vivo**: domanda→Gemini→SQL→guardrail→esecuzione→risposta NL. Es. "Quanti
+    clienti abbiamo?" → `SELECT count(id) FROM customers WHERE tenant_id = 1` → 15.
+  - ✅ Step 3: `app/guardrail.py` + `tests/test_guardrail.py` (read-only,
+    anti-injection, filtro tenant, falsi positivi). **Esteso a L3** (verdetto
+    `needs_human`, vedi sotto).
+  - ✅ Step 4: esecuzione via `app/db/client.py` (`tenant_session` SET LOCAL) +
+    `app/answer.py`. **Gira dal vivo.**
+  - ✅ Step 5: `eval/dataset.json` (10 casi) + `eval/eval.py`. **Girato dal vivo**:
+    10/10 sui casi in cui Gemini rispondeva (i fallimenti erano solo 429/503 del
+    free tier, non errori di logica). Fix: salvataggio risultati reso non-fatale
+    in container (utente non-root) — `eval.py` non crasha più se non può scrivere.
+  - ✅ Step 6: `Dockerfile` + `docker-compose.yml`. **Buildano e girano.** Fix:
+    `pydantic 2.10.4 → 2.11.9` in `requirements.txt` (era ResolutionImpossible:
+    `mcp==1.28.1` esige `pydantic>=2.11.0`; senza questo il build falliva).
+  - ✅ Step 7 (scritto, non ancora eseguito): `DEPLOY_AWS.md` (EC2 t3.micro free tier).
+  - ✅ Test isolamento RLS `tests/test_rls_isolation.py` (4 test): **tutti VERDI
+    col DB reale** — tenant 1 non vede i dati di tenant 2.
+  - ✅ **Interfaccia web (opzione A)**: pagina HTML+JS servita da FastAPI su `GET /`
+    (in `app/main.py`, inline, zero dipendenze). Casella domanda + selettore tenant
+    → mostra risposta, verdetto guardrail, SQL generato. Gira su `http://localhost:8000/`.
+- 🟢 **Livello 2 (v1)** — **grafo VERIFICATO DAL VIVO (2026-07-07)**, non più
+  solo mockato. Criterio "v1 FATTO" raggiunto col DB reale.
+  - ✅ Model router `app/llm/router.py` + `tests/test_router.py`. Gira nel grafo.
+  - ✅ Grafo LangGraph (langgraph 1.2.7): `state.py`, `nodes.py`, `build_graph.py`
+    (planner→router→sql_executor→guardrail→db_executor→reviewer→answer + retry loop).
+  - ✅ **Endpoint `POST /ask-graph`** (in `app/main.py`): esegue lo STESSO lavoro di
+    `/ask` ma via grafo, ritornando modello scelto, verdetti, retry_count. Provabile
+    da Swagger/UI. **Testato dal vivo**: attraversa i 7 nodi, risponde correttamente.
+  - ✅ **Retry loop contro Postgres reale**: `tests/test_graph_live.py` — primo SQL
+    dà 0 righe → reviewer chiede retry → secondo SQL ok. Criterio "v1 FATTO" verde
+    col DB vero (non mockato).
+  - ✅ `tests/test_graph.py` aggiornato (checkpointer → serve `thread_id` per run).
+  - ⬜ Manca: **Langfuse** (tracing — free tier Hobby 50k/mese, deciso di usare il
+    cloud gratuito), **CI/CD**, e **planner/reviewer con Gemini vero** (ora minimali:
+    planner = passthrough, reviewer = deterministico su risultato non vuoto).
+- 🟡 **Livello 3 (v2)** — **gran parte del codice SCRITTA e verificata dal vivo
+  (2026-07-07)**. Manca solo il data flywheel.
+  - ✅ Tool `app/tools/run_query.py` (ri-valida col guardrail + esegue in RLS),
+    `mask_pii.py`, `send_notification.py` (stub) + `tests/test_tools.py`.
   - ✅ Server MCP `app/mcp_server/server.py` (mcp 1.28.1, FastMCP): espone
-    run_query/mask_email/send_notification. Verificato che registra i 3 tool.
-  - ⬜ Manca: guardrail avanzati + human-in-the-loop (interrupt/resume), PII masking
-    nel flusso, data flywheel, SQL avanzato nell'eval. E l'esecuzione MCP live (run_query
-    richiede DB).
+    run_query/mask_email/send_notification.
+  - ✅ **Guardrail avanzato — verdetto `needs_human`**: `SELECT *` senza `LIMIT`
+    (legge tutte le colonne incluse PII, tante righe) → non blocca, chiede umano.
+    Regola stretta di proposito (aggregazioni e colonne esplicite passano).
+  - ✅ **Human-in-the-loop reale** (LangGraph `interrupt` + `MemorySaver`
+    checkpointer): nodo `human_review_node` sospende il grafo; `POST /approve`
+    (con `thread_id` + `decision`) lo riprende. **Verificato dal vivo**: `SELECT *`
+    → SOSPESO → `/approve` → eseguito. `run_query` accetta un bypass di `needs_human`
+    SOLO se `human_approved=True`, mai le regole di sicurezza vere (DROP/injection/
+    no-tenant restano invalicabili). `build_graph.get_graph()` = singleton così
+    `/ask-graph` e `/approve` condividono il checkpointer.
+  - ✅ **PII masking nel flusso**: `answer_node` applica `mask_pii_in_rows` prima di
+    comporre la risposta → email offuscate (`f***@example.com`). **Verificato dal vivo.**
+  - ⬜ Manca: **data flywheel** (tabella `query_logs` + logging di ogni run + usare i
+    log per migliorare i few-shot del planner, misurando il delta di score
+    sull'eval) e **SQL avanzato nel dataset di eval** (join/window functions).
 
 ---
 
@@ -219,18 +239,25 @@ e i tool girano anche come server MCP indipendente.
   Windows) in questo terminale Bash, non come `python` (alias Store attivo).
   Dentro un venv attivato `python` funzionerà normalmente — non è un problema
   per il progetto, va solo saputo per i comandi da terminale grezzi.
-- **Docker Desktop**: CLI installata (docker 29.6.1) e distro WSL2 presente, ma
-  il **daemon non risponde** (verificato 2026-07-06: `docker info` va in timeout).
-  **Ostacolo reale scoperto il 2026-07-06: il disco C: è pieno (0–0.2 GB liberi)**,
-  e lo storage Docker (`docker_data.vhdx`, ~1.1 GB) è ancora su C:. Va spostato su
-  F: (464 GB liberi) prima di poter buildare. Il `docker-compose.yml` è scritto e
-  `docker compose config` lo valida; manca solo un Postgres reale in ascolto.
-- **Postgres per v0**: locale via Docker (deciso 2026-07-05). Alternativa emersa
-  se lo spazio Docker resta bloccato: Postgres nativo su F:. Qualunque Postgres in
-  ascolto su `localhost:5432` sblocca gli step 4-5.
-- **Gemini**: modello `gemini-2.5-flash-lite` (deciso 2026-07-06), free tier.
-  API key su Google AI Studio, salvata in `.env` (mai committata — `.gitignore`).
-  ⚠️ La chiave attuale è comparsa nella chat di sviluppo: va rigenerata.
+- **Docker Desktop**: ✅ **FUNZIONA (2026-07-07)**. Il daemon era bloccato
+  (500 Internal Server Error su ogni route); risolto **riavviando Docker Desktop**
+  (kill processo + riavvio, pronto in ~15s). Lo spazio disco non era più un
+  problema. `docker compose up -d --build` builda e avvia db+app; db diventa
+  healthy (`pg_isready`), app in ascolto su :8000. **Nota Windows/PowerShell**:
+  lo stderr di `docker compose` viene mostrato in rosso come "NativeCommandError"
+  ma NON è un errore — è solo PowerShell che tratta lo stream. `tests/` NON è
+  copiato nell'immagine (il Dockerfile copia solo `app` ed `eval`): per girare i
+  test nel container montare la dir con `-v .../tests:/app/tests:ro`.
+- **Postgres per v0**: ✅ locale via Docker, **gira** (`postgres:16` nel compose,
+  volume `pgdata`, schema+RLS applicati al primo boot). In ascolto su `localhost:5432`.
+- **Gemini**: modello `gemini-2.5-flash-lite`, free tier. **Limite reale: ~20
+  richieste/giorno** per progetto Google (429 RESOURCE_EXHAUSTED oltre; 503 quando
+  il modello è sovraccarico — entrambi transitori, non bug). Un `/ask` o `/ask-graph`
+  = **1 chiamata**. ⚠️ **Le chiavi usate in questa chat (`AQ.Ab8...` e `AIzaSyB...`)
+  sono comparse in chiaro: vanno RIGENERATE su aistudio.google.com/apikey.** La
+  chiave va solo in `.env` (mai committata). Nota sicurezza: nella root
+  `f:\sicurezzacapire` c'è un file `envchiaveesempio` con chiavi in chiaro —
+  aggiunto al `.gitignore` root, ma va cancellato/rigenerato.
 - **Gestione pacchetti Python**: `venv` + `pip` (coerente con quanto già usa
   l'utente in altri progetti Python, vedi `user-profile`).
 

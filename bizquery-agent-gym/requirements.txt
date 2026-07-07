@@ -6,7 +6,7 @@ uvicorn[standard]==0.34.0
 psycopg[binary]==3.2.3
 python-dotenv==1.0.1
 google-genai==0.8.0
-pydantic==2.10.4
+pydantic==2.11.9
 
 # --- Livello 2 (grafo agenti) ---
 langgraph==1.2.7

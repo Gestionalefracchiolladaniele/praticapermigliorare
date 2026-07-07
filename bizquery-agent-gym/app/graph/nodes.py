@@ -14,10 +14,13 @@ campi da aggiornare.
 """
 from __future__ import annotations
 
+from langgraph.types import interrupt
+
 from app.answer import format_answer
 from app.guardrail import check_sql
 from app.llm.gemini_client import generate_sql
 from app.llm.router import route_model
+from app.tools.mask_pii import mask_pii_in_rows
 from app.graph.state import AgentState
 
 MAX_RETRY = 2
@@ -43,11 +46,39 @@ def sql_executor_node(state: AgentState) -> dict:
 
 
 def guardrail_node(state: AgentState) -> dict:
-    """Avvolge check_sql (deterministico)."""
+    """Avvolge check_sql (deterministico). Livello 3: tre verdetti —
+    approved / rejected / needs_human (query lecita ma rischiosa)."""
     v = check_sql(state.sql_candidate or "")
+    if v.needs_human:
+        verdict = "needs_human"
+    elif v.approved:
+        verdict = "approved"
+    else:
+        verdict = "rejected"
+    return {"guardrail_verdict": verdict, "guardrail_reason": v.reason}
+
+
+def human_review_node(state: AgentState) -> dict:
+    """Human-in-the-loop (Livello 3). Sospende il grafo con interrupt() e aspetta
+    una decisione esterna. Alla ripresa (Command(resume=...)) il valore tornato
+    da interrupt() è la decisione umana: "approve" | "reject".
+
+    Convenzione LangGraph: interrupt(payload) salva lo stato col checkpointer e
+    ferma l'esecuzione; il payload è ciò che il client vede per decidere. Serve
+    un checkpointer nel compile() perché lo stato sopravviva tra le due chiamate.
+    """
+    decision = interrupt({
+        "reason": state.guardrail_reason,
+        "sql": state.sql_candidate,
+        "question": state.question,
+    })
+    approved = str(decision).strip().lower() in ("approve", "approved", "yes", "si", "true")
+    if approved:
+        return {"guardrail_verdict": "approved", "human_approved": True}
     return {
-        "guardrail_verdict": "approved" if v.approved else "rejected",
-        "guardrail_reason": v.reason,
+        "guardrail_verdict": "rejected",
+        "human_approved": False,
+        "guardrail_reason": "Rifiutata da revisione umana.",
     }
 
 
@@ -57,7 +88,10 @@ def db_executor_node(state: AgentState) -> dict:
     from app.tools.run_query import run_query
 
     try:
-        rows = run_query(state.sql_candidate or "", state.tenant_id)
+        rows = run_query(
+            state.sql_candidate or "", state.tenant_id,
+            human_approved=bool(state.human_approved),
+        )
         return {"query_result": rows}
     except Exception as e:  # noqa: BLE001
         return {"error": f"esecuzione fallita: {e}"}
@@ -74,5 +108,8 @@ def reviewer_node(state: AgentState) -> dict:
 
 
 def answer_node(state: AgentState) -> dict:
-    """Avvolge format_answer (risposta NL)."""
-    return {"final_answer": format_answer(state.question, state.query_result or [])}
+    """Avvolge format_answer (risposta NL). Livello 3: prima di comporre la
+    risposta, maschera le PII (email) nel risultato — il masking è un livello
+    sopra la RLS (PROJECT.md), applicato in uscita, non a livello DB."""
+    safe_rows = mask_pii_in_rows(state.query_result or [])
+    return {"final_answer": format_answer(state.question, safe_rows)}
