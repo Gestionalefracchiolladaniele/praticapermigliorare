@@ -62,6 +62,44 @@
       "tenant_id": 2,
       "question": "Quanti clienti abbiamo in Italia?",
       "expected": 2
+    },
+
+    {
+      "id": "t1_max_orders_per_customer",
+      "tenant_id": 1,
+      "question": "Qual e' il numero massimo di ordini fatti da un singolo cliente?",
+      "expected": 7,
+      "_sql_kind": "group by + max su aggregato"
+    },
+    {
+      "id": "t1_avg_paid",
+      "tenant_id": 1,
+      "question": "Qual e' il valore medio di un ordine pagato?",
+      "expected": 2547.65,
+      "tolerance": 0.01,
+      "_sql_kind": "avg con filtro"
+    },
+    {
+      "id": "t1_customers_with_orders",
+      "tenant_id": 1,
+      "question": "Quanti clienti distinti hanno almeno un ordine?",
+      "expected": 14,
+      "_sql_kind": "count distinct (join implicito su orders)"
+    },
+    {
+      "id": "t2_top_country_count",
+      "tenant_id": 2,
+      "question": "Quanti clienti ha il paese con piu' clienti?",
+      "expected": 6,
+      "_sql_kind": "group by + max"
+    },
+    {
+      "id": "t2_revenue_all",
+      "tenant_id": 2,
+      "question": "Qual e' il fatturato totale di tutti gli ordini, in qualsiasi stato?",
+      "expected": 119064.22,
+      "tolerance": 0.01,
+      "_sql_kind": "sum senza filtro stato"
     }
   ]
 }

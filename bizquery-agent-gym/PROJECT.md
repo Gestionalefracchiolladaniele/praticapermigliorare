@@ -204,9 +204,14 @@ e i tool girano anche come server MCP indipendente.
     dà 0 righe → reviewer chiede retry → secondo SQL ok. Criterio "v1 FATTO" verde
     col DB vero (non mockato).
   - ✅ `tests/test_graph.py` aggiornato (checkpointer → serve `thread_id` per run).
+  - ✅ **Reviewer LLM vero (2026-07-07)**: `review_answer` in `gemini_client.py`
+    (Gemini Flash valuta se il risultato risponde alla domanda) cablato in
+    `reviewer_node`. Fallback deterministico (righe => ok) se l'LLM non è
+    disponibile, così il grafo funziona comunque. Planner: resta passthrough +
+    few-shot del flywheel (vedi L3) — di fatto il "planner intelligente" è il
+    few-shot + il router.
   - ⬜ Manca: **Langfuse** (tracing — free tier Hobby 50k/mese, deciso di usare il
-    cloud gratuito), **CI/CD**, e **planner/reviewer con Gemini vero** (ora minimali:
-    planner = passthrough, reviewer = deterministico su risultato non vuoto).
+    cloud gratuito) e **CI/CD**.
 - 🟡 **Livello 3 (v2)** — **gran parte del codice SCRITTA e verificata dal vivo
   (2026-07-07)**. Manca solo il data flywheel.
   - ✅ Tool `app/tools/run_query.py` (ri-valida col guardrail + esegue in RLS),
@@ -225,9 +230,18 @@ e i tool girano anche come server MCP indipendente.
     `/ask-graph` e `/approve` condividono il checkpointer.
   - ✅ **PII masking nel flusso**: `answer_node` applica `mask_pii_in_rows` prima di
     comporre la risposta → email offuscate (`f***@example.com`). **Verificato dal vivo.**
-  - ⬜ Manca: **data flywheel** (tabella `query_logs` + logging di ogni run + usare i
-    log per migliorare i few-shot del planner, misurando il delta di score
-    sull'eval) e **SQL avanzato nel dataset di eval** (join/window functions).
+  - ✅ **Data flywheel (2026-07-07)**: tabella `query_logs` (schema + RLS +
+    GRANT INSERT/SELECT al ruolo app + WITH CHECK per l'isolamento in scrittura).
+    `app/flywheel.py`: `log_run` (scrive ogni run, best-effort, non solleva) +
+    `successful_examples` (rilegge le run riuscite come few-shot, de-dup per
+    domanda, isolate per tenant via RLS). Cablato: `log_node` nel grafo (dopo
+    answer), few-shot in `sql_executor_node` (solo al primo tentativo), logging
+    anche in `/ask` v0. `tests/test_flywheel.py` (3 test: read-back, run fallite
+    escluse, isolamento per tenant). **Verificato dal vivo**: run → query_logs →
+    few-shot rilette, tenant 2 non vede i log del tenant 1.
+  - ✅ **SQL avanzato nell'eval (2026-07-07)**: `eval/dataset.json` +5 casi
+    (group by + max, avg con filtro, count distinct, sum senza filtro) con valori
+    attesi calcolati dal DB reale seed=42. Dataset ora 15 casi.
 
 ---
 

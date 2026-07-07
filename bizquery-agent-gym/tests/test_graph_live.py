@@ -29,7 +29,17 @@ def test_retry_loop_live_against_real_db(monkeypatch):
     esegue DAVVERO sul Postgres del container."""
     calls = {"n": 0}
 
-    def fake_generate_sql(question, tenant_id):
+    # reviewer LLM -> fallback deterministico (righe => ok): il test verifica il
+    # retry loop col DB reale, non il giudizio di Gemini. Evita anche di spendere
+    # chiamate free-tier.
+    monkeypatch.setattr(
+        nodes, "review_answer",
+        lambda q, sql, rows: "ok" if rows else "retry_needed",
+    )
+    # niente few-shot dal flywheel in questo test.
+    monkeypatch.setattr(nodes, "successful_examples", lambda tid, **kw: [])
+
+    def fake_generate_sql(question, tenant_id, **kw):
         calls["n"] += 1
         if calls["n"] == 1:
             # Query sintatticamente valida e approvata dal guardrail, ma che

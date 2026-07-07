@@ -6,9 +6,26 @@ Verifica l'ORCHESTRAZIONE (routing, retry, stop), non la qualità dell'SQL:
   - retry loop: primo giro dà risultato vuoto → reviewer chiede retry →
     secondo giro OK (il criterio "v1 FATTO")
 """
+import pytest
+
 import app.graph.nodes as nodes
 from app.graph.build_graph import build_graph
 from langgraph.types import Command
+
+
+@pytest.fixture(autouse=True)
+def _isolate_external(monkeypatch):
+    """I test di orchestrazione non devono toccare Gemini né il DB per i pezzi
+    L3 (flywheel, reviewer LLM). Neutralizziamo:
+      - successful_examples -> nessun few-shot (non serve un DB)
+      - review_answer -> verdetto deterministico su righe (come il vecchio
+        reviewer): così questi test verificano il ROUTING, non il giudizio LLM.
+    I test che vogliono il reviewer LLM vero lo fanno altrove (live)."""
+    monkeypatch.setattr(nodes, "successful_examples", lambda tid, **kw: [])
+    monkeypatch.setattr(
+        nodes, "review_answer",
+        lambda q, sql, rows: "ok" if rows else "retry_needed",
+    )
 
 
 def _invoke(tenant_id=1, question="Quanti clienti?"):
@@ -23,7 +40,7 @@ def _invoke(tenant_id=1, question="Quanti clienti?"):
 def test_happy_path(monkeypatch):
     monkeypatch.setattr(
         nodes, "generate_sql",
-        lambda q, t: "SELECT count(*) FROM customers WHERE tenant_id = 1",
+        lambda q, t, **kw: "SELECT count(*) FROM customers WHERE tenant_id = 1",
     )
     # db_executor importa run_query localmente: patchiamo lì.
     import app.tools.run_query as rq
@@ -37,7 +54,7 @@ def test_happy_path(monkeypatch):
 
 
 def test_guardrail_rejected_stops(monkeypatch):
-    monkeypatch.setattr(nodes, "generate_sql", lambda q, t: "DROP TABLE customers")
+    monkeypatch.setattr(nodes, "generate_sql", lambda q, t, **kw: "DROP TABLE customers")
     out = _invoke(question="cancella tutto")
     assert out["guardrail_verdict"] == "rejected"
     # non deve aver eseguito né prodotto risposta
@@ -50,7 +67,7 @@ def test_retry_loop_then_success(monkeypatch):
     # vuoto (reviewer -> retry) e la seconda dà un risultato (ok).
     monkeypatch.setattr(
         nodes, "generate_sql",
-        lambda q, t: "SELECT count(*) FROM orders WHERE tenant_id = 1",
+        lambda q, t, **kw: "SELECT count(*) FROM orders WHERE tenant_id = 1",
     )
     calls = {"n": 0}
 
@@ -76,7 +93,7 @@ def test_human_in_the_loop_approve(monkeypatch):
     # SQL lecito ma senza LIMIT su selezione di righe -> needs_human.
     monkeypatch.setattr(
         nodes, "generate_sql",
-        lambda q, t: "SELECT * FROM customers WHERE tenant_id = 1",
+        lambda q, t, **kw: "SELECT * FROM customers WHERE tenant_id = 1",
     )
     import app.tools.run_query as rq
     monkeypatch.setattr(rq, "run_query", lambda sql, t, **kw: [[1], [2], [3]])
@@ -101,7 +118,7 @@ def test_human_in_the_loop_reject(monkeypatch):
     import uuid
     monkeypatch.setattr(
         nodes, "generate_sql",
-        lambda q, t: "SELECT * FROM customers WHERE tenant_id = 1",
+        lambda q, t, **kw: "SELECT * FROM customers WHERE tenant_id = 1",
     )
     graph = build_graph()
     cfg = {"configurable": {"thread_id": str(uuid.uuid4())}}
@@ -117,7 +134,7 @@ def test_retry_exhausted_stops(monkeypatch):
     # run_query dà sempre vuoto: dopo MAX_RETRY il grafo si ferma senza answer.
     monkeypatch.setattr(
         nodes, "generate_sql",
-        lambda q, t: "SELECT count(*) FROM orders WHERE tenant_id = 1",
+        lambda q, t, **kw: "SELECT count(*) FROM orders WHERE tenant_id = 1",
     )
     import app.tools.run_query as rq
     monkeypatch.setattr(rq, "run_query", lambda sql, t, **kw: [])

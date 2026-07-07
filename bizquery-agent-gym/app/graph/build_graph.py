@@ -60,6 +60,7 @@ def build_graph():
     g.add_node("db_executor", nodes.db_executor_node)
     g.add_node("reviewer", nodes.reviewer_node)
     g.add_node("answer", nodes.answer_node)
+    g.add_node("log", nodes.log_node)
 
     g.add_edge(START, "planner")
     g.add_edge("planner", "router")
@@ -69,7 +70,8 @@ def build_graph():
     g.add_conditional_edges("human_review", _route_after_human)
     g.add_edge("db_executor", "reviewer")
     g.add_conditional_edges("reviewer", _route_after_reviewer)
-    g.add_edge("answer", END)
+    g.add_edge("answer", "log")   # data flywheel: logga dopo la risposta
+    g.add_edge("log", END)
 
     # Checkpointer: serve perché interrupt() (human_review) persista lo stato tra
     # la sospensione e la ripresa. MemorySaver = in-process, ok per v0/single

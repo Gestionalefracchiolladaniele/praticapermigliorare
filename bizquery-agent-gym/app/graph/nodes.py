@@ -18,9 +18,10 @@ from langgraph.types import interrupt
 
 from app.answer import format_answer
 from app.guardrail import check_sql
-from app.llm.gemini_client import generate_sql
+from app.llm.gemini_client import generate_sql, review_answer
 from app.llm.router import route_model
 from app.tools.mask_pii import mask_pii_in_rows
+from app.flywheel import successful_examples
 from app.graph.state import AgentState
 
 MAX_RETRY = 2
@@ -40,8 +41,14 @@ def router_node(state: AgentState) -> dict:
 
 def sql_executor_node(state: AgentState) -> dict:
     """Genera l'SQL. Avvolge generate_sql (Gemini). Il retry ripassa di qui:
-    incrementiamo retry_count qui così il loop è visibile nello stato."""
-    sql = generate_sql(state.question, state.tenant_id)
+    incrementiamo retry_count qui così il loop è visibile nello stato.
+
+    Data flywheel: passa al modello i few-shot dalle run passate riuscite per
+    questo tenant. Al primo tentativo (retry_count==0) li usa; nei retry no —
+    se un esempio somigliante ha portato all'SQL sbagliato, ripeterlo non aiuta,
+    meglio lasciare rigenerare 'pulito'."""
+    examples = successful_examples(state.tenant_id) if state.retry_count == 0 else []
+    sql = generate_sql(state.question, state.tenant_id, examples=examples)
     return {"sql_candidate": sql, "retry_count": state.retry_count + 1}
 
 
@@ -98,13 +105,13 @@ def db_executor_node(state: AgentState) -> dict:
 
 
 def reviewer_node(state: AgentState) -> dict:
-    """v1 minimale: la review è deterministica — se c'è un risultato non vuoto,
-    ok; altrimenti retry_needed. A regime sarà Gemini Flash che valuta se il
-    risultato risponde alla domanda. Isolato così si sostituisce senza toccare
-    il grafo."""
-    if state.query_result:
-        return {"review_verdict": "ok"}
-    return {"review_verdict": "retry_needed"}
+    """Reviewer LLM (Gemini Flash): valuta se il risultato risponde davvero alla
+    domanda. review_answer ha un fallback deterministico (righe presenti => ok)
+    se l'LLM non è disponibile, quindi il grafo funziona anche senza chiamata."""
+    verdict = review_answer(
+        state.question, state.sql_candidate or "", state.query_result or []
+    )
+    return {"review_verdict": verdict}
 
 
 def answer_node(state: AgentState) -> dict:
@@ -113,3 +120,24 @@ def answer_node(state: AgentState) -> dict:
     sopra la RLS (PROJECT.md), applicato in uscita, non a livello DB."""
     safe_rows = mask_pii_in_rows(state.query_result or [])
     return {"final_answer": format_answer(state.question, safe_rows)}
+
+
+def log_node(state: AgentState) -> dict:
+    """Data flywheel: registra la run in query_logs. success=True solo se il
+    grafo ha prodotto una risposta (final_answer presente). Best-effort: log_run
+    non solleva, quindi questo nodo non può far fallire la run. Non modifica lo
+    stato (ritorna {})."""
+    from app.flywheel import log_run
+
+    log_run(
+        tenant_id=state.tenant_id,
+        question=state.question,
+        generated_sql=state.sql_candidate,
+        guardrail_verdict=state.guardrail_verdict,
+        review_verdict=state.review_verdict,
+        retry_count=state.retry_count,
+        was_flagged=(state.human_approved is not None),
+        human_approved=state.human_approved,
+        success=bool(state.final_answer),
+    )
+    return {}

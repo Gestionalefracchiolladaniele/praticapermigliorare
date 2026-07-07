@@ -301,6 +301,16 @@ def ask(req: AskRequest) -> AskResponse:
         cur = conn.execute(sql)
         rows = [list(r) for r in cur.fetchall()]
 
+    answer = format_answer(req.question, rows)
+
+    # Data flywheel: logga anche le run dell'agente singolo v0 (non solo il grafo).
+    from app.flywheel import log_run
+    log_run(
+        tenant_id=req.tenant_id, question=req.question, generated_sql=sql,
+        guardrail_verdict="approved", review_verdict=None, retry_count=0,
+        was_flagged=False, human_approved=None, success=bool(rows),
+    )
+
     return AskResponse(
         tenant_id=req.tenant_id,
         question=req.question,
@@ -309,5 +319,5 @@ def ask(req: AskRequest) -> AskResponse:
         guardrail_reason="",
         executed=True,
         rows=rows,
-        answer=format_answer(req.question, rows),
+        answer=answer,
     )
