@@ -18,13 +18,32 @@ from langgraph.types import interrupt
 
 from app.answer import format_answer
 from app.guardrail import check_sql
-from app.llm.gemini_client import generate_sql, review_answer
+from app.llm.gemini_client import generate_sql, last_prompt_ref, review_answer
 from app.llm.router import route_model
 from app.tools.mask_pii import mask_pii_in_rows
 from app.flywheel import successful_examples
 from app.graph.state import AgentState
 
 MAX_RETRY = 2
+
+
+def _tag_trace_prompt(field: str, ref: str | None) -> None:
+    """Scrive la versione di prompt usata sui metadata della trace corrente.
+
+    Chiamato DAI NODI: qui il contesto OTel della trace è attivo (il
+    CallbackHandler ha aperto lo span mentre esegue il nodo), quindi
+    update_current_trace funziona — a differenza di dentro generate_sql, dove
+    non c'è span attivo. Best-effort: no-op se tracing spento o fuori contesto."""
+    if not ref:
+        return
+    try:
+        from app.observability.langfuse_setup import get_client
+
+        client = get_client()
+        if client is not None:
+            client.update_current_trace(metadata={field: ref})
+    except Exception:  # noqa: BLE001 — l'observability non deve rompere il grafo
+        pass
 
 
 def planner_node(state: AgentState) -> dict:
@@ -49,7 +68,11 @@ def sql_executor_node(state: AgentState) -> dict:
     meglio lasciare rigenerare 'pulito'."""
     examples = successful_examples(state.tenant_id) if state.retry_count == 0 else []
     sql = generate_sql(state.question, state.tenant_id, examples=examples)
-    return {"sql_candidate": sql, "retry_count": state.retry_count + 1}
+    # Cap.3: dopo la chiamata leggo quale versione di prompt e' stata usata e la
+    # porto nello stato (compare nell'I/O dello span) + sui metadata della trace.
+    ref = last_prompt_ref("sql")
+    _tag_trace_prompt("prompt_ref_sql", ref)
+    return {"sql_candidate": sql, "retry_count": state.retry_count + 1, "prompt_ref_sql": ref}
 
 
 def guardrail_node(state: AgentState) -> dict:
@@ -111,7 +134,9 @@ def reviewer_node(state: AgentState) -> dict:
     verdict = review_answer(
         state.question, state.sql_candidate or "", state.query_result or []
     )
-    return {"review_verdict": verdict}
+    ref = last_prompt_ref("review")
+    _tag_trace_prompt("prompt_ref_review", ref)
+    return {"review_verdict": verdict, "prompt_ref_review": ref}
 
 
 def answer_node(state: AgentState) -> dict:

@@ -30,6 +30,10 @@ class AgentState(BaseModel):
     guardrail_reason: str | None = None
     query_result: list | None = None
     review_verdict: str | None = None      # "ok" | "retry_needed"
+    # Versione di prompt Langfuse usata (Cap.3 Prompt Management): "name@vN" o
+    # "name@fallback". Nello stato → compare nell'I/O degli span della trace.
+    prompt_ref_sql: str | None = None
+    prompt_ref_review: str | None = None
     retry_count: int = 0
     human_approved: bool | None = None     # esito revisione umana (L3), se avvenuta
     final_answer: str | None = None

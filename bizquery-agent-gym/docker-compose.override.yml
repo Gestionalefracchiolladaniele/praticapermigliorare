@@ -1,0 +1,17 @@
+# Override di SVILUPPO (solo locale). Compose carica QUESTO file automaticamente
+# quando lanci `docker compose up` SENZA specificare i -f (cioe' in locale).
+#
+# In cloud NON viene caricato, perche' sulla EC2 si usa esplicitamente:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# (elencando i file a mano, l'override automatico e' escluso).
+#
+# Cosa fa: monta il codice dal disco dentro il container -> modifichi un file .py
+# e la modifica e' subito attiva senza rebuild dell'immagine (hot-reload).
+# In cloud NON si vuole (il codice sta dentro l'immagine buildata) -> per questo
+# sta qui e non nel base. Vedi la nota in docker-compose.yml (sezione app).
+
+services:
+  app:
+    volumes:
+      - ./app:/app/app
+      - ./eval:/app/eval

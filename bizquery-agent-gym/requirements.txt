@@ -11,6 +11,16 @@ pydantic==2.11.9
 # --- Livello 2 (grafo agenti) ---
 langgraph==1.2.7
 
+# --- Livello 2 (observability / tracing) ---
+# Langfuse v4 (SDK su OpenTelemetry). Il CallbackHandler (langfuse.langchain)
+# aggancia il grafo LangGraph: LangGraph invoca i callback a ogni nodo e Langfuse
+# costruisce trace(=run) + span(=nodo). Il handler v4 legge chiavi/host dal client
+# Langfuse globale, che inizializziamo in observability/langfuse_setup.py.
+# `langchain` è richiesto dall'integrazione (langchain-core arriva come dipendenza).
+# Versioni verificate compatibili coi pin sopra in Python 3.12 (nessun conflitto).
+langfuse==4.13.2
+langchain==1.3.12
+
 # --- Livello 3 (tool come server MCP) ---
 mcp==1.28.1
 

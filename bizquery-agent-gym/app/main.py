@@ -186,6 +186,9 @@ class GraphResponse(BaseModel):
     guardrail_reason: str | None = None
     review_verdict: str | None = None
     retry_count: int = 0
+    # Versione di prompt Langfuse usata (Cap.3 Prompt Management): "name@vN".
+    prompt_ref_sql: str | None = None
+    prompt_ref_review: str | None = None
     final_answer: str | None = None
     error: str | None = None
 
@@ -218,6 +221,8 @@ def _graph_response(req_tenant: int, question: str, thread_id: str, result: dict
         guardrail_reason=result.get("guardrail_reason"),
         review_verdict=result.get("review_verdict"),
         retry_count=result.get("retry_count", 0),
+        prompt_ref_sql=result.get("prompt_ref_sql"),
+        prompt_ref_review=result.get("prompt_ref_review"),
         final_answer=result.get("final_answer"),
         error=result.get("error"),
     )
@@ -236,11 +241,19 @@ def ask_graph(req: AskRequest) -> GraphResponse:
     import uuid
     from app.graph.build_graph import get_graph
     from app.graph.state import AgentState
+    from app.observability.langfuse_setup import get_callback_handler, flush
 
     graph = get_graph()
     thread_id = str(uuid.uuid4())
     cfg = {"configurable": {"thread_id": thread_id}}
+    # Observability: se Langfuse è configurato, aggancia il CallbackHandler così la
+    # run diventa una trace (span per nodo). Se non lo è, handler=None → nessun
+    # callback, il grafo gira identico.
+    handler = get_callback_handler()
+    if handler is not None:
+        cfg["callbacks"] = [handler]
     result = graph.invoke(AgentState(question=req.question, tenant_id=req.tenant_id), cfg)
+    flush()  # invia subito la trace (no-op se tracing disattivo)
     return _graph_response(req.tenant_id, req.question, thread_id, result,
                            _first_interrupt(result))
 
@@ -250,11 +263,18 @@ def approve(req: ApproveRequest) -> GraphResponse:
     """Riprende una run sospesa su human_review con la decisione umana."""
     from langgraph.types import Command
     from app.graph.build_graph import get_graph
+    from app.observability.langfuse_setup import get_callback_handler, flush
 
     graph = get_graph()
     cfg = {"configurable": {"thread_id": req.thread_id}}
+    # Anche la ripresa dopo human-in-the-loop va tracciata (stesso thread_id →
+    # continua la stessa run nella dashboard).
+    handler = get_callback_handler()
+    if handler is not None:
+        cfg["callbacks"] = [handler]
     # Command(resume=...) inietta la decisione come valore di ritorno di interrupt().
     result = graph.invoke(Command(resume=req.decision), cfg)
+    flush()
     # Recupera la domanda dallo stato persistito per la risposta.
     snap = graph.get_state(cfg)
     question = snap.values.get("question", "") if snap else ""

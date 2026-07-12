@@ -2,8 +2,8 @@
 
 Piano completo e visione a regime in [PROJECT.md](PROJECT.md). Costruito a livelli
 incrementali. **Tutto il codice applicativo dei 3 livelli è scritto e gira dal
-vivo in Docker** (Gemini + Postgres reali). Restano solo observability (Langfuse),
-CI/CD e il deploy AWS.
+vivo in Docker** (Gemini + Postgres reali). Observability con **Langfuse** attiva
+(tracing + evaluation offline su dataset). Restano CI/CD e il deploy AWS.
 
 Un utente business fa una domanda in italiano sui dati aziendali; un agente
 (LangGraph) la traduce in SQL, la valida (guardrail + RLS multi-tenant), la
@@ -30,7 +30,8 @@ e ogni run loggata per migliorare i few-shot nel tempo (data flywheel).
 - ✅ Grafo LangGraph con **retry loop** contro Postgres reale — `app/graph/`
 - ✅ Reviewer LLM (Gemini Flash valuta il risultato) + fallback deterministico
 - ✅ Endpoint `POST /ask-graph` (stesso lavoro di `/ask` ma via grafo)
-- ⬜ Langfuse (tracing), CI/CD
+- ✅ **Langfuse tracing** (ogni run = trace, ogni nodo = span) — `app/observability/`
+- ⬜ CI/CD
 
 **Livello 3 (guardrail avanzati, MCP, flywheel)** — 🟢 code-complete:
 - ✅ Tool `run_query` / `mask_pii` / `send_notification` + server MCP
@@ -80,6 +81,8 @@ I test che richiedono il DB (`test_rls_isolation`, `test_graph_live`,
 
 ## Evaluation
 
+**Locale** (senza Langfuse, output JSON):
+
 ```bash
 docker compose run --rm -v "$PWD/eval/results:/app/eval/results" app \
   python -m eval.eval
@@ -88,6 +91,23 @@ docker compose run --rm -v "$PWD/eval/results:/app/eval/results" app \
 Esegue i 15 casi di `eval/dataset.json`, misura l'execution accuracy, salva un
 JSON in `eval/results/`. (I fallimenti tipici sono i 429/503 del free tier Gemini,
 non errori di logica.)
+
+**Su Langfuse** (evaluation offline: dataset versionato + dataset run + score
+navigabili nella UI):
+
+```bash
+# 1. carica il dataset su Langfuse (una volta, o quando cambia; non chiama Gemini)
+docker compose exec -T app python -m eval.langfuse_dataset
+
+# 2. gira l'experiment (5 casi default; --all per 15; --no-cache per ignorare la cache SQL)
+docker compose exec -T app python -m eval.eval_langfuse
+```
+
+Usa `dataset.run_experiment(task=, evaluators=)`: **task** = la pipeline reale,
+**evaluator** = score `correct` 1/0. L'SQL generato è **cachato** in
+`eval/results/sql_cache.json` così i rilanci non consumano il free tier Gemini.
+Risultato in **Datasets → bizquery-eval → Runs** con link diretto a ogni trace.
+Richiede le `LANGFUSE_*` nel `.env` (senza chiavi, si disattiva pulito).
 
 ## Struttura
 
@@ -115,9 +135,13 @@ app/
     send_notification.py  # stub notifica
   mcp_server/
     server.py          # [L3] espone i tool come server MCP
+  observability/
+    langfuse_setup.py  # [L2] client Langfuse globale + callback handler (autodisattivo)
 eval/
   dataset.json         # 15 casi domanda→numero (attesi dal seed deterministico)
-  eval.py              # execution accuracy, output JSON in eval/results/
+  eval.py              # execution accuracy locale, output JSON in eval/results/
+  langfuse_dataset.py  # upload dataset.json → Dataset Langfuse (idempotente)
+  eval_langfuse.py     # experiment su Langfuse (run_experiment: task + evaluator, cache SQL)
 tests/                 # v0 + router + grafo + tool + flywheel (mock + live)
 demo_graph.py          # [L2] demo visiva del flusso del grafo, no DB/API (python demo_graph.py)
 Dockerfile             # immagine app (non-root)
@@ -128,7 +152,9 @@ LANGGRAPH_NOTES.md     # convenzioni LangGraph (verificate su langgraph 1.2.7)
 
 ## Cosa resta (non più codice applicativo core)
 
-- **Langfuse** (observability) — free tier Hobby gratuito; integrazione da scrivere.
+- **Langfuse** — ✅ tracing + evaluation offline fatti. Restano le capacità
+  avanzate (prompt management, feedback online, LLM-as-judge, dashboards, A/B):
+  percorso di studio in [LEARN_LANGFUSE.md](LEARN_LANGFUSE.md).
 - **CI/CD** — GitHub Actions (build + test + deploy).
 - **Deploy AWS** — EC2 t3.micro free tier (richiede account AWS).
 - **Sicurezza** — rigenerare le API key Gemini usate in sviluppo.

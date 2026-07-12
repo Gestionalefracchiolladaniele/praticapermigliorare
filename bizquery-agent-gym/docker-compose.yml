@@ -17,7 +17,13 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      # Legato al SOLO loopback: Postgres NON va mai pubblicato su 0.0.0.0 —
+      # l'app lo raggiunge via rete interna Docker (host 'db'), qui la porta
+      # serve solo per un eventuale `psql -h localhost` dall'host. Su 127.0.0.1
+      # resta irraggiungibile da internet anche sulla EC2. (NB: le liste 'ports'
+      # in compose si FONDONO tra base e override -> il binding sicuro va messo
+      # QUI nel base, non si puo' "correggere" da un override.)
+      - "127.0.0.1:5432:5432"
     volumes:
       # Applica schema + RLS + crea il ruolo bizquery_app al primo boot.
       - ./app/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
@@ -43,8 +49,20 @@ services:
       DATABASE_URL_ADMIN: postgresql://postgres:postgres@db:5432/bizquery
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
+      # Observability (Langfuse). Se vuote nel .env, il tracing resta disattivo.
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
     ports:
       - "8000:8000"
+    # NB: i volumi di sviluppo (montaggio del codice dal disco per l'hot-reload)
+    # NON stanno piu' qui — sono in docker-compose.override.yml, che Compose carica
+    # AUTOMATICAMENTE solo in locale. Motivo: le liste (ports/volumes) in un file
+    # override si FONDONO col base, non lo sostituiscono -> se il montaggio
+    # `./app:/app/app` fosse nel base, in cloud verrebbe montata una cartella
+    # inesistente sopra il codice dell'immagine e l'app non partirebbe
+    # (`Could not import module app.main`, verificato 2026-07-11). Cosi' il base
+    # e' production-safe: usa il codice DENTRO l'immagine.
 
 volumes:
   pgdata:

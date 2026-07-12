@@ -159,7 +159,156 @@ e i tool girano anche come server MCP indipendente.
 
 ---
 
+## Nota per il futuro — "BizQuery advanced" (versione senior, coi crediti AWS)
+
+> **Intuizione dell'utente (2026-07-11), da riprendere in una sessione dedicata.**
+> Dopo aver chiuso il deploy SEMPLICE (EC2 singola + `docker compose`, free tier
+> puro), rifare il deploy come lo farebbe un senior — versione **advanced**,
+> sfruttando i **crediti AWS gratuiti** (120 USD residui al 2026-07-11, validi
+> fino a ~gennaio 2027, + fino a ~100 USD guadagnabili completando le attività
+> "Guadagna crediti" nella console). I crediti coprono i servizi che NON sono
+> free tier, così l'advanced si fa a costo zero reale.
+>
+> **Perché a strati e non subito advanced**: si vede prima la versione "a mano"
+> (si capisce ogni pezzo), poi la versione orchestrata (si capisce cosa
+> automatizza e perché). Sul CV vale di più saper fare ENTRAMBE e saper scegliere
+> il livello giusto (giudizio architetturale = skill senior).
+>
+> **Piano "advanced", a strati (ognuno un esercizio dedicato, da fare passo dopo
+> passo su richiesta dell'utente):**
+> 1. **Infrastructure as Code (Terraform)** — infra descritta in codice,
+>    creabile e DISTRUGGIBILE con un comando. Il pezzo senior per eccellenza.
+> 2. **ECS Fargate** — container orchestrati invece di `docker compose` a mano.
+> 3. **RDS Postgres** — DB gestito con backup, invece del container Postgres.
+> 4. **Secrets Manager** — evoluzione del pattern SSM già usato nel deploy semplice.
+> 5. **Application Load Balancer + HTTPS** — dominio + certificato TLS (no più HTTP:8000).
+> 6. **CI/CD (GitHub Actions)** — push → deploy automatico su ECS (il CI/CD che
+>    era stato consapevolmente saltato nel deploy semplice).
+>
+> ⚠️ **Regola d'oro advanced**: ECS+RDS+ALB bruciano ~30-50 USD/mese se lasciati
+> accesi. Si accende per l'esercizio, si verifica, si **distrugge** (con Terraform
+> è un `destroy`). Il budget alert a 0 USD già attivo protegge da sorprese.
+> Quando i crediti finiscono, se resta acceso, si paga.
+
+---
+
+## Direzioni di crescita e lista pratica (deciso 2026-07-12)
+
+> **Contesto**: il codice applicativo dei 3 livelli è già fatto e live. La domanda
+> ora non è "quale tech nuova", ma **come raffinare il profilo verso i ruoli di
+> mercato**. Discussi ruoli-estensione e skill interne all'AI Engineer. Sia LLMOps
+> che AI Security **si imparano con la PRATICA** (costruendo/attaccando sistemi veri),
+> non con lo studio teorico → BizQuery è il banco di prova. Tutto fattibile con
+> Claude Code (zero ML pesante).
+
+### Ruoli-estensione decisi (i 3 migliori per questo profilo)
+
+1. **LLMOps / AI Platform Engineer** ⭐ — l'upgrade più naturale. È già l'80% di
+   BizQuery (observability, eval harness, deploy, CI/CD, cost control, guardrails,
+   prompt management). ⚠️ **Distinzione critica di posizionamento**: "ML Platform
+   Engineer" ha DUE rami. **Ramo A** (platform per il *training* di modelli: GPU
+   cluster, distributed training, Kubeflow, feature store) = tocca ML vero, **da
+   IGNORARE** (cugino del ML pesante escluso). **Ramo B** = **LLMOps** (platform per
+   sistemi LLM in produzione: nessun training, tutto framework/codice) = quello che
+   già facciamo. **Sul CV usare il titolo "LLMOps / AI Platform Engineer", NON "ML
+   Platform" secco** (ambiguo → un recruiter potrebbe aspettarsi distributed training).
+   Leggere sempre le responsabilità dell'annuncio: LangGraph/eval/tracing/agents → è
+   ramo B (sei tu); training/GPU/Kubeflow → ramo A (salta).
+2. **Applied AI Engineer / Forward Deployed Engineer** ⭐ — il ramo "business".
+   Vai dal cliente, traduci il problema in soluzione agentica su misura. Combacia col
+   profilo full-stack+product. È il ramo che porta a Staff/Principal (decisioni +
+   business value). Dubai/consulenza lo pagano oro.
+3. **AI Security Engineer** — la nicchia già toccata (guardrail, anti-injection, PII,
+   RLS, IAM). In EU/Dubai (AI Act, GDPR) poco affollata e pagata benissimo.
+
+> **Ruoli SCARTATi**: Data Engineer puro (torna verso l'infra del dato: Airflow/
+> Snowflake/dbt/Kafka — ops-pesante, direzione opposta; se ne rubano a pezzi solo
+> dbt + un orchestratore + data quality, senza convertirsi). ML Engineer/Research e
+> MLOps GPU (già esclusi: matematica/Master). **OSINT e pentesting generalista**:
+> mestieri interi e divergenti — impararli "un po'" disperde, non dà un ruolo (a meno
+> che non diventino passione, altro discorso). La security che conviene è quella
+> **applicata agli agenti che già si costruiscono**, non un pivot al pentest.
+
+### Skill interne all'AI Engineer da rafforzare (le 3 a ROI più alto)
+
+1. **Evaluation come sistema** 🔥 — il gap #1 storico. Non l'eval offline (già fatta),
+   ma: LLM-as-judge multi-criterio (faithfulness, groundedness, task-success, safety,
+   cost) + regression testing in CI (prompt cambia → score scende → merge bloccato) +
+   feedback online (il Cap.4 Langfuse lasciato in sospeso). È ciò che separa dal
+   "provare a mano". Farlo su BizQuery tocca automaticamente le altre due sotto.
+2. **Context Engineering** — la skill 2026 dei senior agentici. Assemblare
+   dinamicamente il contesto (cosa metti/comprimi/recuperi, state management, memory).
+   Il data flywheel è già un pezzo → renderlo sistematico.
+3. **Robustezza agentica in produzione** — failure recovery, idempotenza, gestione
+   tool falliti, cost/latency per richiesta, fallback tra modelli. C'è già il retry
+   loop → il livello Staff è renderlo misurabile e a prova di produzione.
+
+### Lista pratica — cosa FARE su BizQuery (per skill)
+
+**LLMOps (banco di prova = BizQuery):**
+- [ ] Feedback online: endpoint `/feedback` che scrive uno Score Langfuse su una trace (Cap.4 lasciato)
+- [ ] LLM-as-judge multi-criterio nell'eval (faithfulness / groundedness / task-success / safety / cost)
+- [ ] Regression testing dell'agente in CI (soglia di score → blocca il merge se scende)
+- [ ] CI/CD GitHub Actions (l'unico pezzo L2 ancora mancante) + eval nella pipeline
+- [ ] Cost/latency dashboard per richiesta (Langfuse) + budget alert per tenant
+- [ ] BizQuery advanced (Terraform/ECS/RDS/Secrets/ALB) — vedi nota sopra
+
+**AI Security (banco di prova = attaccare i guardrail di BizQuery):**
+- [ ] Mini red-team: bucare l'anti-injection e il PII masking, poi indurirli
+- [ ] Suite di test di jailbreak/prompt-injection contro l'agente (regressione di sicurezza)
+- [ ] Mappare BizQuery sull'OWASP Top 10 for LLMs (quali coperti, quali no)
+- [ ] Rigenerare la chiave Gemini compromessa in SSM (già in TODO cleanup) — igiene segreti
+- [ ] Threat model del flusso agentico (dove un input malevolo può fare danni)
+
+> **Consiglio secco dato all'utente**: partire da **Evaluation come sistema**
+> (feedback online + LLM-judge + regression in CI) perché è il singolo blocco a ROI
+> più alto e spinge dritto verso il ruolo #1 (LLMOps).
+
+---
+
 ## Stato avanzamento
+
+> **Aggiornamento 2026-07-12 — deploy AWS COMPLETATO, L1 Step 7 CHIUSO. ✅**
+> L'app è LIVE su internet: `POST http://35.152.199.210:8000/ask` risponde da IP
+> pubblico ("Quanti clienti abbiamo?" → Gemini genera SQL → guardrail approva →
+> RLS esegue → "15"). `/health` → `{"status":"ok"}`. Seed fatto (30 cust/100
+> ord/2 tenant). I 2 fix del deploy sono stati risolti — e la lezione vale in
+> generale: **in Docker Compose le liste (`ports`, `volumes`) di un override si
+> FONDONO col base, non lo sostituiscono** (`ports: []`/`volumes: []` non tolgono
+> nulla). Perciò: (1) la 5432 è legata a `127.0.0.1` NEL BASE (non "spenta" da un
+> override); (2) i volumi di sviluppo (montaggio codice per hot-reload) sono stati
+> spostati dal base a **`docker-compose.override.yml`** (Compose lo carica auto
+> SOLO in locale) — nel base restavano e in cloud montavano una cartella vuota
+> sopra `/app/app`, per cui l'app non partiva (`Could not import module app.main`).
+> Ora il base è production-safe. L'app containerizzata gira su AWS EC2 (t3.micro,
+> free tier, regione Milano `eu-south-1`). Metodo scelto = "migliore possibile restando safe e
+> vicino al prod avanzato": immagine buildata in locale e pushata su
+> **ghcr.io** (`ghcr.io/gestionalefracchiolladaniele/bizquery:latest`, pacchetto
+> pubblico → pull anonimo), la EC2 fa solo `pull`. Compose base + override
+> `docker-compose.prod.yml` (no build sulla EC2, no volume codice, Postgres NON
+> esposto, `restart: unless-stopped`, schema montato da `~/schema.sql`).
+> **Segreti come in prod**: la `GEMINI_API_KEY` sta in **SSM Parameter Store**
+> (SecureString `/bizquery/gemini-api-key`), la EC2 la legge via **IAM role**
+> `bizquery-ec2-role` con **policy custom least-privilege** `bizquery-ssm-read`
+> (solo `ssm:Get*` su `parameter/bizquery/*` + `kms:Decrypt` ristretto a
+> `kms:ViaService=ssm.eu-south-1`). **Verificato dal vivo**: la macchina legge e
+> decifra la chiave col solo ruolo, nessun segreto su disco. Security group: solo
+> 22 (dal mio IP) + 8000 (pubblica); 5432 chiusa. ⚠️ **La chiave Gemini in SSM è
+> ancora quella compromessa `AIzaSyBz...` — va RIGENERATA** su
+> aistudio.google.com/apikey (scelta consapevole per sbloccare il deploy).
+> **Dati di progetto operativi** (dettagli comandi/token/chiave/script in
+> `DEPLOY_AWS_HANDOFF.md`): account AWS ID `799374460640`; **budget alert AWS
+> "zero spend" ATTIVO** (email appena la spesa supera 0,01 USD = rete di sicurezza
+> costi); **IP pubblico `35.152.199.210` è DINAMICO** (cambia se la EC2 si riavvia
+> → riverificarlo in console prima di usarlo); ⚠️ **i file nuovi di questa sessione
+> NON sono committati su git** (`docker-compose.prod.yml`, `docker-compose.override.yml`,
+> `CONCETTI_APPRESI.md`, `DEPLOY_AWS_HANDOFF.md`, `PROJECT.md` mod.) — repo
+> `Gestionalefracchiolladaniele/praticapermigliorare`, git root `F:\sicurezzacapire`.
+> **Concetti/architettura chiariti in questa sessione**: appunti di studio in
+> `bizquery-agent-gym/CONCETTI_APPRESI.md` (cos'è BizQuery come API, database/
+> DATABASE_URL vs mentalità Supabase, come un'azienda lo usa, SaaS con auth, MCP
+> con esempi aziendali, Docker/registry/scatole, AWS vs Supabase, dominio+HTTPS).
+> Per la versione senior/advanced vedi la nota "BizQuery advanced" sopra.
 
 > **Aggiornamento 2026-07-07 — sessione "tutto dal vivo in Docker".** Docker
 > sbloccato e l'intero stack gira davvero (Postgres 16 + app FastAPI in
@@ -210,8 +359,22 @@ e i tool girano anche come server MCP indipendente.
     disponibile, così il grafo funziona comunque. Planner: resta passthrough +
     few-shot del flywheel (vedi L3) — di fatto il "planner intelligente" è il
     few-shot + il router.
-  - ⬜ Manca: **Langfuse** (tracing — free tier Hobby 50k/mese, deciso di usare il
-    cloud gratuito) e **CI/CD**.
+  - ✅ **Langfuse tracing (2026-07-09)**: `app/observability/langfuse_setup.py`
+    (client globale + callback handler autodisattivo se mancano le chiavi),
+    agganciato a `/ask-graph` e `/approve`. Ogni run = trace, ogni nodo = span.
+  - ✅ **Langfuse evaluation offline (2026-07-09)**: `eval/langfuse_dataset.py`
+    (upload idempotente di `dataset.json` → Dataset `bizquery-eval`) +
+    `eval/eval_langfuse.py` (`run_experiment` con task=pipeline ed evaluator=`correct`
+    1/0, cache SQL per non bruciare il free tier). Percorso completo delle 8 capacità
+    Langfuse in `LEARN_LANGFUSE.md`.
+  - ✅ **Langfuse prompt management (2026-07-09)**: `_SYSTEM_PROMPT`/`_REVIEW_PROMPT`
+    versionati su Langfuse (`bizquery-sql-system`, `bizquery-reviewer`) con fallback
+    hardcoded. `app/observability/prompts.py` (`get_prompt` con fallback nativo v4 +
+    cache), `app/observability/seed_prompts.py` (carica etichettati `production`).
+    Variabili `{{var}}` (sintassi Langfuse). Link prompt→run: `prompt_ref_*` nello
+    `AgentState`/`GraphResponse`, popolato dai nodi. Hot-swap prompt senza redeploy
+    verificato dal vivo. (Cap.3 del percorso a 8 capacità in `LEARN_LANGFUSE.md`.)
+  - ⬜ Manca: **CI/CD**.
 - 🟡 **Livello 3 (v2)** — **gran parte del codice SCRITTA e verificata dal vivo
   (2026-07-07)**. Manca solo il data flywheel.
   - ✅ Tool `app/tools/run_query.py` (ri-valida col guardrail + esegue in RLS),

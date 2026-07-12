@@ -24,6 +24,8 @@ import re
 from dotenv import load_dotenv
 from google import genai
 
+from app.observability.prompts import get_prompt
+
 load_dotenv()
 
 # Descrizione schema data al modello. Volutamente compatta: è il "contratto" che
@@ -39,16 +41,20 @@ orders(id INT, tenant_id INT, customer_id INT, total_amount NUMERIC,
 status di orders puo' essere: 'pending', 'paid', 'cancelled', 'refunded'.
 """
 
+# Fallback hardcoded del prompt di sistema, usato se Langfuse è offline/non
+# configurato (Capacità 3 — Prompt Management). NB: sintassi variabili Langfuse
+# `{{var}}` (doppia graffa), NON str.format: lo stesso testo funziona sia caricato
+# su Langfuse sia come fallback. Nome del prompt su Langfuse: "bizquery-sql-system".
 _SYSTEM_PROMPT = """\
 Sei un generatore di SQL PostgreSQL in sola lettura per una business intelligence.
 Regole ASSOLUTE:
 - Genera UNA sola query SELECT. Mai INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/CREATE.
-- Filtra SEMPRE per il tenant indicato: aggiungi `tenant_id = {tenant_id}` nel
+- Filtra SEMPRE per il tenant indicato: aggiungi `tenant_id = {{tenant_id}}` nel
   WHERE di ogni tabella business (customers, orders).
 - Non selezionare la colonna email a meno che non sia strettamente richiesto (PII).
 - Rispondi con la SOLA query SQL, senza spiegazioni, senza markdown, senza ```.
 
-{schema}
+{{schema}}
 """
 
 
@@ -93,8 +99,18 @@ def generate_sql(
     verso lo stile che ha già funzionato. Opzionale: senza esempi il
     comportamento è identico a prima."""
     model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
-    system = _SYSTEM_PROMPT.format(tenant_id=int(tenant_id), schema=_SCHEMA_DESC)
-    system += _few_shot_block(examples or [])
+    # Prompt Management (Cap.3): recupera il prompt di sistema da Langfuse; se
+    # offline ricade sul fallback hardcoded _SYSTEM_PROMPT, comportamento identico.
+    resolved = get_prompt(
+        "bizquery-sql-system",
+        _SYSTEM_PROMPT,
+        tenant_id=int(tenant_id),
+        schema=_SCHEMA_DESC,
+    )
+    # Il few-shot del flywheel è dinamico (dipende dalle run passate) → resta fuori
+    # dal prompt versionato e viene appeso dopo la compilazione.
+    system = resolved.text + _few_shot_block(examples or [])
+    _record_prompt_ref("sql", resolved.ref)
 
     resp = _client().models.generate_content(
         model=model,
@@ -104,6 +120,29 @@ def generate_sql(
     return _clean_sql(resp.text or "")
 
 
+# Registro dell'ultima versione di prompt usata, per chiave logica ("sql",
+# "review"). Perche' cosi': la versione di prompt va LINKATA alla trace, ma la
+# chiamata Gemini gira nel thread del nodo, FUORI dal contesto OTel dello span
+# aperto dal CallbackHandler di LangGraph — quindi update_current_generation() qui
+# e' un no-op (verificato: "No active span in current context"). Soluzione pulita:
+# generate_sql/review_answer registrano il ref qui; il NODO del grafo (che ha il
+# contesto trace attivo) lo legge subito dopo e lo mette nello stato e sui metadata
+# della trace. Semplice, testabile, e non dipende dal contesto OTel del thread.
+_LAST_PROMPT_REF: dict[str, str] = {}
+
+
+def _record_prompt_ref(key: str, ref: str) -> None:
+    """Registra la versione di prompt appena usata (letta poi dal nodo del grafo)."""
+    _LAST_PROMPT_REF[key] = ref
+
+
+def last_prompt_ref(key: str) -> str | None:
+    """Ritorna l'ultimo `name@vN` usato per `key` ("sql" | "review"), o None."""
+    return _LAST_PROMPT_REF.get(key)
+
+
+# Fallback hardcoded del reviewer (nessuna variabile). Nome su Langfuse:
+# "bizquery-reviewer".
 _REVIEW_PROMPT = """\
 Sei un revisore di risposte per una business intelligence. Ricevi una DOMANDA in
 linguaggio naturale, l'SQL eseguito e il RISULTATO (righe). Valuta SOLO se il
@@ -123,13 +162,16 @@ def review_answer(question: str, sql: str, rows: list) -> str:
     has_rows = bool(rows)
     try:
         model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+        # Prompt Management (Cap.3): reviewer da Langfuse, fallback all'hardcoded.
+        resolved = get_prompt("bizquery-reviewer", _REVIEW_PROMPT)
+        _record_prompt_ref("review", resolved.ref)
         # Passiamo un estratto del risultato: bastano le prime righe per giudicare.
         preview = str(rows[:5]) if rows else "[]"
         contents = f"DOMANDA: {question}\nSQL: {sql}\nRISULTATO (prime righe): {preview}"
         resp = _client().models.generate_content(
             model=model,
             contents=contents,
-            config={"system_instruction": _REVIEW_PROMPT, "temperature": 0.0},
+            config={"system_instruction": resolved.text, "temperature": 0.0},
         )
         verdict = (resp.text or "").strip().upper()
         if verdict.startswith("OK"):

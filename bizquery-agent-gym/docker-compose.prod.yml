@@ -1,0 +1,37 @@
+# BizQuery — override di PRODUZIONE per la EC2 (deploy AWS free tier).
+#
+# Si usa SEMPRE insieme al compose base, in questo ordine:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Cosa cambia rispetto al locale (e PERCHE'):
+#  1. app.image invece di app.build  -> la EC2 NON builda (1GB RAM): tira
+#     un'immagine gia' pronta da ghcr.io. Il build si fa sul PC potente in locale.
+#  2. Niente volumi di sviluppo sull'app -> in cloud il codice sta DENTRO
+#     l'immagine. I volumi dev NON sono nel base (sono in docker-compose.override.yml,
+#     caricato solo in locale) -> qui non c'e' nulla da neutralizzare sull'app.
+#  3. db.volumes ridichiarato -> lo schema sulla EC2 sta in ~/schema.sql, non in
+#     app/db/. La porta 5432 e' gia' legata a 127.0.0.1 nel BASE (sicura).
+#
+# LEZIONE CHIAVE (verificata dal vivo 2026-07-11): in Docker Compose le liste
+# (ports, volumes) di un override si FONDONO col base, NON lo sostituiscono.
+# Quindi `ports: []` / `volumes: []` NON tolgono nulla. Corollario: ogni binding
+# o mount che NON deve esistere in cloud va tenuto FUORI dal base (nel .override
+# di sviluppo), non "spento" da qui. Per questo il base e' production-safe e i
+# pezzi solo-dev stanno in docker-compose.override.yml.
+
+services:
+  db:
+    # Ridichiariamo i VOLUMI del db: sulla EC2 lo schema e' in ~/schema.sql
+    # (accanto al compose), non in app/db/. NB: i volumi si fondono per lista,
+    # ma qui la voce pgdata e' identica al base (nessun doppione problematico) e
+    # lo schema del base (./app/db/schema.sql) sulla EC2 non esiste -> Postgres
+    # lo ignora se il file manca; il mount valido e' questo ./schema.sql.
+    volumes:
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - pgdata:/var/lib/postgresql/data
+
+  app:
+    # username GitHub in minuscolo (ghcr.io obbliga lowercase).
+    image: ghcr.io/gestionalefracchiolladaniele/bizquery:latest
+    restart: unless-stopped   # se la EC2 si riavvia, l'app ritorna su da sola
