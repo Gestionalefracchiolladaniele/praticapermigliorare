@@ -75,6 +75,24 @@ def run(with_judge: bool = False) -> int:
     )
     print(f"  (dettaglio: {report['passed']}/{report['total']} casi corretti)")
 
+    # Elenca i casi NON corretti col motivo: serve a capire se un fallimento e'
+    # colpa del sistema (SQL sbagliato) o rumore del free tier (429/503). Senza
+    # questo, il gate dice solo "0.733" e si e' costretti a indovinare.
+    failed = [r for r in report["results"] if not r.get("ok")]
+    if failed:
+        print("  casi falliti:")
+        for r in failed:
+            status = r.get("status", "?")
+            if status == "executed":
+                motivo = f"ottenuto={r.get('got')} atteso={r.get('expected')}"
+            elif status == "guardrail_rejected":
+                motivo = f"guardrail: {r.get('reason')}"
+            elif status == "error":
+                motivo = f"errore: {r.get('error')}"
+            else:
+                motivo = status
+            print(f"    - {r['id']:24} [{status}] {motivo}")
+
     if with_judge:
         print("\nQuality gate — LLM-as-judge (qualita')")
         judge_scores = _run_judge_over_dataset()
