@@ -1,0 +1,93 @@
+# CI di BizQuery — test + quality gate a ogni push.
+#
+# PERCHE' ESISTE
+# --------------
+# E' la "I" di CI/CD e il "regression testing in CI" del PROJECT.md: a ogni push,
+# GitHub esegue in automatico i test e il quality gate. Se qualcosa si rompe o la
+# qualita' scende sotto soglia, la pipeline diventa ROSSA e (con branch protection)
+# blocca il merge. E' cio' che rende impossibile peggiorare il sistema senza
+# accorgersene.
+#
+# DUE JOB, COSTI DIVERSI
+# ----------------------
+#   test         -> pytest, mockato. Zero Gemini, zero DB. Gira a OGNI push: economico.
+#   quality-gate -> eval reale su un Postgres usa-e-getta. CHIAMA GEMINI (~15 chiamate),
+#                   quindi gira solo su push a main / a mano, per non bruciare il free tier.
+#
+# Il codice BizQuery vive nella sottocartella bizquery-agent-gym/ del repo: tutti i
+# job ci si spostano dentro (working-directory).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:        # permette di lanciarla a mano dalla UI di GitHub
+
+defaults:
+  run:
+    working-directory: bizquery-agent-gym
+
+jobs:
+  # --- Job 1: test unitari (veloci, senza rete ne' DB) -----------------------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Installa dipendenze
+        run: pip install -r requirements.txt
+      - name: Esegui i test mockati
+        # Solo i test che NON toccano DB/rete: la nostra rete di sicurezza economica.
+        run: pytest tests/test_judge.py tests/test_quality_gate.py tests/test_guardrail.py tests/test_tools.py tests/test_router.py -q
+
+  # --- Job 2: quality gate (eval reale su Postgres temporaneo) ---------------
+  quality-gate:
+    runs-on: ubuntu-latest
+    # Gira solo su push a main o lancio manuale: contiene chiamate Gemini reali.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: test               # se i test falliscono, inutile spendere quota Gemini
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bizquery
+        ports:
+          - 5432:5432
+        # Aspetta che il DB sia pronto prima di procedere.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Il gate/eval legge queste (come .env in locale). La chiave e' un SECRET
+      # di GitHub: Settings -> Secrets and variables -> Actions -> GEMINI_API_KEY.
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      # DUE DSN, come in produzione (docker-compose): l'ADMIN (superuser) crea
+      # schema/ruoli e seeda; l'altro (ruolo bizquery_app, NOBYPASSRLS) e' quello
+      # con cui gira l'eval -> cosi' la CI testa il sistema CON la RLS attiva,
+      # identico al reale. Testare da superuser bypasserebbe la RLS: falso verde.
+      DATABASE_URL_ADMIN: postgresql://postgres:postgres@localhost:5432/bizquery
+      DATABASE_URL: postgresql://bizquery_app:bizquery_app_pw@localhost:5432/bizquery
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Installa dipendenze
+        run: pip install -r requirements.txt
+      - name: Applica schema + RLS al DB di test (crea anche il ruolo bizquery_app)
+        # Come superuser: lo schema crea ruoli e grant, serve il privilegio admin.
+        run: psql "$DATABASE_URL_ADMIN" -f app/db/schema.sql
+      - name: Seed del DB di test
+        # seed.py usa DATABASE_URL_ADMIN (popolare richiede scrittura fuori dai grant app).
+        run: python -m app.db.seed
+      - name: Quality gate (execution accuracy)
+        # Gira come ruolo bizquery_app (DATABASE_URL) -> RLS attiva, come in prod.
+        # Se l'accuracy scende sotto soglia (thresholds.json) esce != 0 -> job ROSSO.
+        run: python -m eval.quality_gate

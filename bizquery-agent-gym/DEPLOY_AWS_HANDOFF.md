@@ -88,13 +88,12 @@ ssh -i "F:\donwloads\bizquery.chiave.pem" ec2-user@35.152.199.210 \
 Infine aprire nel browser: **http://35.152.199.210:8000/** → fare una domanda,
 verificare risposta + guardrail + SQL. Questo chiude L1 Step 7.
 
-## Debiti aperti (cleanup, dopo che tutto gira)
-- ⚠️ **Rigenerare la chiave Gemini**: quella in SSM (`AIzaSyBz...`) è compromessa (comparsa
-  in chiaro). Rigenerarla su aistudio.google.com/apikey, poi aggiornare il parametro SSM:
-  `aws ssm put-parameter --name /bizquery/gemini-api-key --value NUOVA --type SecureString --overwrite --region eu-south-1`
-- **TERMINARE la EC2** quando non serve (free tier: 1 istanza, 750h/mese — se lasciata
-  accesa consuma le ore). In console EC2 → istanza → Operazioni → Stato istanza → Termina.
-- Cancellare `F:\sicurezzacapire\envchiaveesempio` (chiavi in chiaro, gitignorato).
+## Debiti aperti (cleanup) — CHIUSI il 2026-07-13 ✅
+- ✅ **Chiave Gemini rigenerata** e aggiornata in SSM (`/bizquery/gemini-api-key`).
+  Comando usato: `aws ssm put-parameter --name /bizquery/gemini-api-key --value NUOVA --type SecureString --overwrite --region eu-south-1`
+- ✅ **`envchiaveesempio` rimosso** (era in chiaro, gitignorato).
+- 🟢 **EC2**: lasciata ACCESA di proposito (app live su `35.152.199.210:8000`), da
+  rivalutare più avanti. Per terminarla: console EC2 → istanza → Operazioni → Stato → Termina.
 
 ## Nota futura — versione "advanced" (senior, coi crediti AWS)
 Vedi sezione "BizQuery advanced" in cima a `PROJECT.md`: dopo questo deploy semplice,

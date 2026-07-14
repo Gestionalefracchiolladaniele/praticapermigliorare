@@ -1,0 +1,10 @@
+{
+  "_note": "Soglie minime che il quality gate PRETENDE. Se una metrica scende sotto la sua soglia, il gate fallisce (exit code != 0) e in CI blocca il merge/deploy. Alza una soglia quando il sistema migliora stabilmente: git terra' la storia di quando e perche' hai alzato l'asticella (regression testing serio). Valori in [0,1].",
+  "execution_accuracy": 0.8,
+  "_judge_note": "Le soglie judge sono OPZIONALI: valgono solo quando il gate gira con --judge (che costa chiamate Gemini). Senza --judge il gate controlla solo execution_accuracy.",
+  "judge": {
+    "faithfulness": 0.8,
+    "relevance": 0.8,
+    "safety": 0.9
+  }
+}

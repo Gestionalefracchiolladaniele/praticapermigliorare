@@ -47,7 +47,15 @@ def _matches(got, expected, tolerance: float | None) -> bool:
     return float(got) == float(expected)
 
 
-def run() -> int:
+def evaluate() -> dict:
+    """Gira la pipeline su tutto il dataset e ritorna i numeri, senza stampare.
+
+    Estratto da run() perche' il quality_gate ha bisogno del VALORE dell'accuracy
+    (per confrontarlo con una soglia), non solo dell'exit code. run() resta la
+    versione "da riga di comando" che stampa e usa questi numeri.
+
+    Ritorna: {"accuracy": float, "passed": int, "total": int, "results": [...]}.
+    """
     # Import qui: serve il DB, non deve rompere l'import del modulo se manca psycopg
     # in contesti dove eval non gira.
     from app.db.client import tenant_session
@@ -82,6 +90,13 @@ def run() -> int:
 
     total = len(cases)
     accuracy = passed / total if total else 0.0
+    return {"accuracy": accuracy, "passed": passed, "total": total, "results": results}
+
+
+def run() -> int:
+    report = evaluate()
+    results = report["results"]
+    passed, total, accuracy = report["passed"], report["total"], report["accuracy"]
 
     # Stampa leggibile
     for r in results:
@@ -95,10 +110,7 @@ def run() -> int:
     try:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         out.write_text(
-            json.dumps(
-                {"accuracy": accuracy, "passed": passed, "total": total, "results": results},
-                indent=2, ensure_ascii=False,
-            ),
+            json.dumps(report, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         print(f"Salvato: {out}")

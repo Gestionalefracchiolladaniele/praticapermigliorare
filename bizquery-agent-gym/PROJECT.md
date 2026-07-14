@@ -257,7 +257,7 @@ e i tool girano anche come server MCP indipendente.
 - [ ] Mini red-team: bucare l'anti-injection e il PII masking, poi indurirli
 - [ ] Suite di test di jailbreak/prompt-injection contro l'agente (regressione di sicurezza)
 - [ ] Mappare BizQuery sull'OWASP Top 10 for LLMs (quali coperti, quali no)
-- [ ] Rigenerare la chiave Gemini compromessa in SSM (già in TODO cleanup) — igiene segreti
+- [x] Rigenerare la chiave Gemini compromessa in SSM (già in TODO cleanup) — igiene segreti ✅ (2026-07-13)
 - [ ] Threat model del flusso agentico (dove un input malevolo può fare danni)
 
 > **Consiglio secco dato all'utente**: partire da **Evaluation come sistema**

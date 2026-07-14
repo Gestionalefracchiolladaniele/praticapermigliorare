@@ -27,9 +27,14 @@ vuoi per prendere confidenza con la UI, senza bruciare la quota. (E' anche un pa
 vero di produzione: "generation caching" per cost/latency control.)
 
 Uso:
-    docker compose exec -T app python -m eval.eval_langfuse         # 5 casi (default)
-    docker compose exec -T app python -m eval.eval_langfuse --all   # tutti e 15
+    docker compose exec -T app python -m eval.eval_langfuse           # 5 casi, solo 'correct'
+    docker compose exec -T app python -m eval.eval_langfuse --all     # tutti e 15
     docker compose exec -T app python -m eval.eval_langfuse --no-cache  # ignora cache SQL
+    docker compose exec -T app python -m eval.eval_langfuse --judge   # + LLM-as-judge (qualita')
+
+NB --judge: aggiunge 3 score di qualita' (faithfulness/relevance/safety) via un
+secondo LLM-giudice. Costa 1 chiamata Gemini PER CASO -> e' opt-in per non bruciare
+il free tier. Vedi app/llm/judge.py per il come e il perche'.
 """
 from __future__ import annotations
 
@@ -101,14 +106,23 @@ def _get_sql(item_id: str, question: str, tenant_id: int) -> str:
 
 
 def task(*, item, **kwargs):
-    """Pipeline BizQuery su un item del dataset -> output scalare (o dict d'errore).
+    """Pipeline BizQuery su un item del dataset -> output DICT arricchito.
 
     Riceve un DatasetItem: item.input (dict con 'question'), item.expected_output,
     item.metadata (tenant_id, tolerance, ...). Langfuse traccia questa funzione come
     la trace dell'item.
+
+    OUTPUT: prima ritornavamo lo scalare nudo. Ora ritorniamo un DICT con tutto
+    cio' che serve ai due tipi di evaluator che girano sullo stesso caso:
+      - correct_evaluator legge output["scalar"]  (execution accuracy, come prima)
+      - i judge evaluator leggono question/sql/rows/answer (qualita' multi-criterio)
+    Un dict solo alimenta entrambi con UNA sola esecuzione della pipeline: non
+    rieseguiamo SQL o formattazione per criterio.
     """
+    from app.answer import format_answer
     from app.db.client import tenant_session
     from app.guardrail import check_sql
+    from app.tools.mask_pii import mask_pii_in_rows
 
     question = item.input["question"]
     tenant_id = item.metadata["tenant_id"]
@@ -118,40 +132,58 @@ def task(*, item, **kwargs):
 
     verdict = check_sql(sql)
     if not verdict.approved:
-        # Ritorniamo un output "non numerico" strutturato: l'evaluator lo vedra'
-        # come != expected -> score 0. Cosi' un guardrail-reject conta come fallito
-        # ma non fa crashare l'experiment.
-        return {"error": "guardrail_rejected", "reason": verdict.reason, "sql": sql}
+        # Guardrail-reject: nessuna risposta prodotta. Output senza 'answer' ->
+        # correct lo vede != expected (scalar=None), i judge lo vedono come
+        # "nessuna risposta da giudicare". Conta come fallito, non crasha.
+        return {
+            "question": question, "sql": sql, "scalar": None,
+            "error": "guardrail_rejected", "reason": verdict.reason,
+        }
 
     with tenant_session(tenant_id) as conn:
         rows = [list(r) for r in conn.execute(sql).fetchall()]
-    return _extract_scalar(rows)
+
+    # La RISPOSTA che il judge valuta e' quella VERA che vede l'utente: righe
+    # mascherate (PII) -> formattazione NL deterministica. Cosi' safety e
+    # faithfulness sono giudicate sull'output reale del sistema, non su un proxy.
+    masked = mask_pii_in_rows(rows)
+    answer = format_answer(question, masked)
+
+    return {
+        "question": question,
+        "sql": sql,
+        "rows": masked,
+        "answer": answer,
+        "scalar": _extract_scalar(rows),  # per correct_evaluator (valore non mascherato)
+    }
 
 
-def correct_evaluator(*, input, output, expected_output=None, metadata=None, **kwargs):
-    """Score 'correct' 1/0: l'output scalare corrisponde all'atteso?
+def correct_evaluator(*, input=None, output=None, expected_output=None, metadata=None, **kwargs):
+    """Score 'correct' 1/0: lo scalare prodotto corrisponde all'atteso?
 
-    Usa la tolerance dal metadata per i confronti float (fatturati/medie). Un output
-    non numerico (dict d'errore da guardrail) -> 0.
+    Legge output["scalar"] dal dict arricchito del task. Usa la tolerance dal
+    metadata per i confronti float (fatturati/medie). Scalare mancante (None,
+    es. guardrail-reject) -> 0.
     """
-    if not isinstance(output, (int, float)):
-        return Evaluation(name="correct", value=0.0, comment=f"output non numerico: {output}")
+    scalar = output.get("scalar") if isinstance(output, dict) else output
+    if not isinstance(scalar, (int, float)):
+        return Evaluation(name="correct", value=0.0, comment=f"output non numerico: {scalar}")
     if expected_output is None:
         return Evaluation(name="correct", value=0.0, comment="nessun expected_output")
 
     tolerance = (metadata or {}).get("tolerance")
     if tolerance is not None:
-        ok = abs(float(output) - float(expected_output)) <= tolerance
+        ok = abs(float(scalar) - float(expected_output)) <= tolerance
     else:
-        ok = float(output) == float(expected_output)
+        ok = float(scalar) == float(expected_output)
     return Evaluation(
         name="correct",
         value=1.0 if ok else 0.0,
-        comment=f"ottenuto={output} atteso={expected_output}",
+        comment=f"ottenuto={scalar} atteso={expected_output}",
     )
 
 
-def run(subset: list[str] | None) -> int:
+def run(subset: list[str] | None, *, with_judge: bool = False) -> int:
     client = get_client()
     if client is None:
         print("[stop] Langfuse non configurato. Carica prima il dataset e le chiavi.")
@@ -169,11 +201,25 @@ def run(subset: list[str] | None) -> int:
     if subset is not None:
         dataset.items = [it for it in dataset.items if it.id in subset]
 
+    # Evaluator: sempre 'correct' (execution accuracy). Con --judge aggiungiamo i
+    # tre criteri di qualita' LLM-as-judge. Sono OPT-IN perche' ognuno costa 1
+    # chiamata Gemini per caso: si accende quando serve, non a ogni run, per non
+    # bruciare il free tier (~20 chiamate/giorno).
+    evaluators = [correct_evaluator]
+    if with_judge:
+        from eval.judge_evaluators import JUDGE_EVALUATORS, reset_memo
+
+        reset_memo()
+        evaluators = evaluators + JUDGE_EVALUATORS
+
     result = dataset.run_experiment(
         name="BizQuery eval",
-        description="Execution accuracy della pipeline (domanda->SQL->DB) sui casi seed.",
+        description=(
+            "Pipeline domanda->SQL->DB. Score: correct (accuracy)"
+            + (" + faithfulness/relevance/safety (LLM-judge)" if with_judge else "")
+        ),
         task=task,
-        evaluators=[correct_evaluator],
+        evaluators=evaluators,
     )
 
     if _use_cache:
@@ -189,9 +235,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--all", action="store_true", help="gira tutti e 15 i casi")
     parser.add_argument("--no-cache", action="store_true", help="ignora la cache SQL")
+    parser.add_argument(
+        "--judge", action="store_true",
+        help="aggiungi gli score LLM-as-judge (faithfulness/relevance/safety). "
+             "Costa 1 chiamata Gemini per caso: occhio al free tier.",
+    )
     args = parser.parse_args()
 
     if args.no_cache:
         _use_cache = False
     subset = None if args.all else _DEFAULT_SUBSET
-    sys.exit(run(subset))
+    sys.exit(run(subset, with_judge=args.judge))
