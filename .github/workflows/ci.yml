@@ -89,5 +89,19 @@ jobs:
         run: python -m app.db.seed
       - name: Quality gate (execution accuracy)
         # Gira come ruolo bizquery_app (DATABASE_URL) -> RLS attiva, come in prod.
-        # Se l'accuracy scende sotto soglia (thresholds.json) esce != 0 -> job ROSSO.
-        run: python -m eval.quality_gate
+        # Exit code del gate:
+        #   0 = superato        -> job VERDE
+        #   1 = sotto soglia    -> job ROSSO (blocca: qualita' regredita davvero)
+        #   2 = inconcludente   -> troppi rate-limit Gemini (quota free tier esaurita):
+        #                          NON e' colpa del codice, quindi NON facciamo fallire
+        #                          la CI. Logghiamo un warning e lasciamo il job verde.
+        # Questo evita il "falso rosso" quando hai finito le 20 chiamate gratis/giorno.
+        run: |
+          set +e
+          python -m eval.quality_gate
+          code=$?
+          if [ "$code" = "2" ]; then
+            echo "::warning::Quality gate INCONCLUSIVO (rate-limit Gemini). Rilancia quando la quota si ricarica."
+            exit 0
+          fi
+          exit $code

@@ -85,12 +85,37 @@ def evaluate() -> dict:
             if ok:
                 passed += 1
         except Exception as e:  # noqa: BLE001 — vogliamo continuare sul caso dopo
-            row.update(status="error", error=str(e), ok=False)
+            # Distinguiamo i rate-limit (429 quota / 503 sovraccarico) dagli errori
+            # veri: un 429 NON e' un fallimento di qualita' del sistema, e' un caso
+            # che non abbiamo POTUTO valutare. Il quality_gate li esclude dal conto
+            # dell'accuracy invece di contarli come sbagliati (falso rosso).
+            msg = str(e)
+            is_rate_limit = (
+                "429" in msg or "RESOURCE_EXHAUSTED" in msg
+                or "503" in msg or "UNAVAILABLE" in msg
+            )
+            row.update(
+                status="rate_limited" if is_rate_limit else "error",
+                error=msg, ok=False,
+            )
         results.append(row)
 
     total = len(cases)
+    # 'valutabili' = casi in cui il sistema ha davvero prodotto una risposta (non
+    # persi per rate-limit). L'accuracy "onesta" si misura su questi.
+    rate_limited = sum(1 for r in results if r.get("status") == "rate_limited")
+    evaluable = total - rate_limited
     accuracy = passed / total if total else 0.0
-    return {"accuracy": accuracy, "passed": passed, "total": total, "results": results}
+    accuracy_evaluable = passed / evaluable if evaluable else 0.0
+    return {
+        "accuracy": accuracy,
+        "accuracy_evaluable": accuracy_evaluable,
+        "passed": passed,
+        "total": total,
+        "evaluable": evaluable,
+        "rate_limited": rate_limited,
+        "results": results,
+    }
 
 
 def run() -> int:

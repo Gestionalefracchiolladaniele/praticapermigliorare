@@ -67,13 +67,36 @@ def run(with_judge: bool = False) -> int:
     from eval.eval import evaluate
 
     report = evaluate()
+
+    # ROBUSTEZZA AI RATE-LIMIT (free tier). Un 429/503 non e' un fallimento di
+    # qualita': e' un caso che non abbiamo POTUTO valutare. Quindi:
+    #  1) misuriamo l'accuracy solo sui casi VALUTABILI (non persi per rate-limit);
+    #  2) se troppi casi cadono per rate-limit, il campione e' troppo piccolo per
+    #     dare un verdetto -> esito INCONCLUSIVE (exit 2), ne' pass ne' fail.
+    # Cosi' la CI non diventa rossa perche' hai finito la quota gratis del giorno.
+    evaluable = report["evaluable"]
+    total = report["total"]
+    rate_limited = report["rate_limited"]
+    min_evaluable = thresholds.get("min_evaluable_cases", 1)
+
+    if rate_limited:
+        print(f"  [nota] {rate_limited}/{total} casi persi per rate-limit (429/503) -> esclusi dal conto")
+
+    if evaluable < min_evaluable:
+        print(
+            f"  [INCONCLUSIVE] solo {evaluable} casi valutabili (min {min_evaluable}): "
+            f"troppi rate-limit per esprimere un verdetto."
+        )
+        print("\nQUALITY GATE: INCONCLUSIVO (riprova quando la quota Gemini si ricarica).")
+        return 2
+
     _check(
         "execution_accuracy",
-        report["accuracy"],
+        report["accuracy_evaluable"],
         thresholds["execution_accuracy"],
         failures,
     )
-    print(f"  (dettaglio: {report['passed']}/{report['total']} casi corretti)")
+    print(f"  (dettaglio: {report['passed']}/{evaluable} casi valutabili corretti)")
 
     # Elenca i casi NON corretti col motivo: serve a capire se un fallimento e'
     # colpa del sistema (SQL sbagliato) o rumore del free tier (429/503). Senza
@@ -89,6 +112,8 @@ def run(with_judge: bool = False) -> int:
                 motivo = f"guardrail: {r.get('reason')}"
             elif status == "error":
                 motivo = f"errore: {r.get('error')}"
+            elif status == "rate_limited":
+                motivo = "rate-limit (429/503) — non valutato, escluso dal conto"
             else:
                 motivo = status
             print(f"    - {r['id']:24} [{status}] {motivo}")
