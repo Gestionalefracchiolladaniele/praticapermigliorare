@@ -8,12 +8,29 @@ v0/L3-base: maschera le email in modo deterministico e reversibile-solo-in-parte
   marco.rossi@example.com -> m***@example.com
 Mantiene il dominio (utile per analisi tipo "quanti clienti su gmail") ma nasconde
 l'identità. Non è cifratura: è offuscamento per non esporre PII nelle risposte.
+
+Nota di design (2026-07-14, dopo red-team): valutato Microsoft Presidio (lo
+standard PII industriale, NER su nomi/telefoni/IBAN). SCARTATO per BizQuery:
+tira dietro spaCy+numpy (~300MB) per fare NER su TESTO LIBERO, ma qui le PII
+sono SOLO la colonna strutturata `customers.email`. Uno stack NLP per mascherare
+un campo email è sovradimensionato. Presidio diventa la scelta giusta SOLO se in
+futuro lo schema aggiunge nomi/telefoni/testo libero da mascherare. Fino ad
+allora: regex, ma resa robusta all'Unicode (il red-team ha mostrato che la
+versione ASCII-only lasciava `josé.garcía@…` in chiaro).
 """
 from __future__ import annotations
 
 import re
 
-_EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
+# `\w` con re.UNICODE (default in Python 3) copre lettere accentate/non-ASCII
+# nella local part (josé, garcía, ...). Il red-team aveva bucato la versione
+# `[A-Za-z0-9._%+-]` proprio con email a nome europeo: non venivano mascherate.
+# Niente \b in testa: \b tra spazio e lettera accentata è inaffidabile in Unicode;
+# ancoriamo invece su un confine "non-carattere-email" via lookbehind negativo.
+_EMAIL_RE = re.compile(
+    r"(?<![\w.%+-])([^\W\d_])[\w.%+-]*(@[\w.-]+\.[A-Za-z]{2,})",
+    re.UNICODE,
+)
 
 
 def mask_email(value: str) -> str:

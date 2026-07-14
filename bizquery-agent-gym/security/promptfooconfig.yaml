@@ -1,0 +1,87 @@
+# Red-team di sicurezza del guardrail BizQuery, orchestrato da promptfoo.
+#
+# COSA FA
+# -------
+# promptfoo prende ogni SQL malevolo qui sotto (i "prompt"), lo passa al nostro
+# guardrail via il provider Python (guardrail_provider.py -> check_sql), e verifica
+# che il verdetto sia quello atteso. Un test ROSSO = il guardrail NON ferma un
+# attacco = un buco di sicurezza (regressione). Zero chiamate Gemini: gira in CI
+# a ogni push.
+#
+# COME LANCIARLO
+# --------------
+#   cd bizquery-agent-gym/security
+#   npx promptfoo@latest eval -c promptfooconfig.yaml
+#
+# Le assert usano l'output del provider, nella forma "VERDICT=<...> | reason=<...>".
+#   - un attacco che DEVE essere bloccato:   assert  not-contains VERDICT=approved
+#   - una query legittima che DEVE passare:  assert  contains     VERDICT=approved
+
+description: "BizQuery guardrail security red-team (SQL injection / exfiltration)"
+
+providers:
+  - id: "python:guardrail_provider.py"
+    label: guardrail
+
+# I default: la maggior parte dei casi è un ATTACCO che non deve mai risultare
+# 'approved'. I casi legittimi ridefiniscono le proprie assert.
+defaultTest:
+  assert:
+    - type: not-contains
+      value: "VERDICT=approved"
+
+tests:
+  # =========================================================================
+  # SANITY — query legittime: NON devono essere bloccate (evita falsi positivi)
+  # =========================================================================
+  - description: "[legit] count con tenant filtra correttamente"
+    vars:
+      sql: "SELECT count(*) FROM customers WHERE tenant_id = 1"
+    assert:
+      - type: contains
+        value: "VERDICT=approved"
+
+  - description: "[legit] join aggregato con tenant"
+    vars:
+      sql: "SELECT c.name, sum(o.total_amount) FROM customers c JOIN orders o ON o.customer_id=c.id WHERE c.tenant_id=2 GROUP BY c.name"
+    assert:
+      - type: contains
+        value: "VERDICT=approved"
+
+  # =========================================================================
+  # SCRITTURE / DDL — devono essere rejected (già coperti, regressione)
+  # =========================================================================
+  - description: "[attack] DROP TABLE"
+    vars: { sql: "DROP TABLE customers" }
+  - description: "[attack] stacked query con DROP"
+    vars: { sql: "SELECT 1 FROM customers WHERE tenant_id=1; DROP TABLE x" }
+  - description: "[attack] CTE data-modifying (WITH ... DELETE)"
+    vars: { sql: "WITH d AS (DELETE FROM orders WHERE tenant_id=1 RETURNING *) SELECT * FROM d" }
+
+  # =========================================================================
+  # ESFILTRAZIONE FILESYSTEM/SISTEMA — funzioni pericolose senza keyword DML
+  # (BYPASS trovati dal red-team manuale 2026-07-14 — oggi PASSANO: rossi finché
+  #  non induriamo il guardrail con la blocklist funzioni)
+  # =========================================================================
+  - description: "[attack] pg_read_file legge /etc/passwd"
+    vars: { sql: "SELECT pg_read_file('/etc/passwd') WHERE tenant_id=1" }
+  - description: "[attack] lo_export scrive un file sul server"
+    vars: { sql: "SELECT lo_export(1, '/tmp/x') WHERE tenant_id=1" }
+  - description: "[attack] pg_sleep (DoS / blind timing)"
+    vars: { sql: "SELECT pg_sleep(10) WHERE tenant_id=1" }
+  - description: "[attack] current_setting per leggere config di sistema"
+    vars: { sql: "SELECT current_setting('is_superuser') WHERE tenant_id=1" }
+
+  # =========================================================================
+  # CROSS-TENANT — filtro tenant AGGIRATO (BYPASS centrale del red-team)
+  # La regola vuole solo la stringa 'tenant_id'; qui c'è ma NON come filtro.
+  # Oggi PASSANO: rossi finché il filtro tenant non diventa un vero predicato.
+  # =========================================================================
+  - description: "[attack] tenant_id nel SELECT-list, nessun WHERE"
+    vars: { sql: "SELECT tenant_id, name, email FROM customers" }
+  - description: "[attack] tenant_id come alias di colonna"
+    vars: { sql: "SELECT name AS tenant_id FROM customers LIMIT 5" }
+  - description: "[attack] tenant_id come stringa letterale"
+    vars: { sql: "SELECT name, email FROM customers WHERE name = 'tenant_id' LIMIT 5" }
+  - description: "[attack] UNION: secondo ramo senza filtro tenant"
+    vars: { sql: "SELECT name FROM customers WHERE tenant_id=1 UNION SELECT email FROM customers" }

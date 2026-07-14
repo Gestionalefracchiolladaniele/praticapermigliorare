@@ -255,12 +255,18 @@ e i tool girano anche come server MCP indipendente.
 - [ ] Cost/latency dashboard per richiesta (Langfuse) + budget alert per tenant
 - [ ] BizQuery advanced (Terraform/ECS/RDS/Secrets/ALB) — vedi nota sopra
 
-**AI Security (banco di prova = attaccare i guardrail di BizQuery):** ⬅️ PROSSIMA FASE
-- [ ] Mini red-team: bucare l'anti-injection e il PII masking, poi indurirli
-- [ ] Suite di test di jailbreak/prompt-injection contro l'agente (regressione di sicurezza)
-- [ ] Mappare BizQuery sull'OWASP Top 10 for LLMs (quali coperti, quali no)
+**AI Security (banco di prova = attaccare i guardrail di BizQuery):** ⬅️ IN CORSO
+- [x] Mini red-team: bucare l'anti-injection e il PII masking, poi indurirli ✅ (2026-07-14)
+      8 bypass trovati → 0. Vedi `security/README.md` e "Stato → Aggiornamento 2026-07-14 (sera)".
+- [x] Suite di test di jailbreak/prompt-injection contro l'agente (regressione di sicurezza) ✅ (2026-07-14)
+      `tests/test_security_redteam.py` (19 test), agganciata alla CI (job `test`, zero Gemini).
+- [x] Mappare BizQuery sull'OWASP Top 10 for LLMs (quali coperti, quali no) ✅ (2026-07-14)
+      Tabella in `security/README.md`.
 - [x] Rigenerare la chiave Gemini compromessa in SSM (già in TODO cleanup) — igiene segreti ✅ (2026-07-13)
 - [ ] Threat model del flusso agentico (dove un input malevolo può fare danni)
+      Parzialmente avviato (OWASP map); resta LLM04 data-poisoning via flywheel.
+- [ ] garak scanner (contro guardrail no-LLM / contro /ask a quota piena) — prossima sessione
+- [ ] promptfoo su /ask end-to-end (injection reale) — manuale, quota permettendo
 
 > **Consiglio secco dato all'utente**: partire da **Evaluation come sistema**
 > (feedback online + LLM-judge + regression in CI) perché è il singolo blocco a ROI
@@ -271,6 +277,54 @@ e i tool girano anche come server MCP indipendente.
 ---
 
 ## Stato avanzamento
+
+> **Aggiornamento 2026-07-14 (sera) — AI SECURITY, 1° PEZZO: red-team dei guardrail FATTO. ✅**
+> Attaccati i guardrail veri di BizQuery, induriti, e trasformati gli attacchi in
+> regressione di sicurezza in CI. **Non ancora committato** (fine sessione).
+>
+> **Metodo scelto (dopo discussione)**: l'utente voleva usare repo/tool standard del
+> mestiere (garak/promptfoo/presidio) invece di solo regex a mano. Decisione presa
+> insieme, con criterio:
+> - **presidio SCARTATO** per ora (motivo nel codice `mask_pii.py`): tira spaCy+numpy
+>   (~300MB) per NER su TESTO LIBERO, ma qui le PII sono SOLO la colonna `email`
+>   strutturata → sovradimensionato. Diventa giusto se lo schema aggiunge nomi/telefoni.
+> - **promptfoo ADOTTATO come design**, ma `npx promptfoo` si blocca in questo ambiente
+>   (download/interattività) → il **motore che gira in CI è un runner pytest** che legge
+>   gli STESSI casi dalla `promptfooconfig.yaml` (fonte unica di verità). La config
+>   promptfoo resta valida per quando npx è disponibile (report più ricco).
+> - **garak RIMANDATO** a prossima sessione (Python 3.14 fresco → containerizzare; e
+>   contro /ask brucia quota Gemini). Nota utente: "usare Claude Code al posto di Gemini"
+>   NON è fattibile — garak attacca l'endpoint `/ask` che ha Gemini cablato dentro; il
+>   red-team ha senso solo contro il sistema VERO. Uso corretto: garak contro il guardrail
+>   (no LLM, zero quota) oppure contro /ask a quota piena.
+>
+> **Buchi trovati → chiusi**: red-team iniziale **8 bypass su 13**, dopo hardening **0**.
+> - `pg_read_file`/`lo_export`/`pg_sleep`/`current_setting` passavano (SELECT read-only
+>   con `tenant_id` nella stringa, nessuna keyword di scrittura) → **blocklist funzioni
+>   pericolose** in `guardrail.py`.
+> - `SELECT tenant_id, email FROM customers` (no WHERE), `AS tenant_id` (alias),
+>   `WHERE name='tenant_id'` (stringa), `UNION SELECT ...` (2° ramo senza filtro)
+>   passavano perché il check tenant era una **substring** → ora è un **vero predicato**
+>   (`tenant_id =/IN/BETWEEN`) richiesto in **OGNI ramo** di UNION/INTERSECT/EXCEPT.
+> - PII: `josé.garcía@…` restava in chiaro (regex ASCII-only) → **regex Unicode**.
+>
+> **Cosa è stato creato/modificato** (git root `F:\sicurezzacapire`):
+> - `bizquery-agent-gym/app/guardrail.py` — blocklist funzioni + filtro tenant a predicato + UNION per-ramo.
+> - `bizquery-agent-gym/app/tools/mask_pii.py` — regex Unicode + nota "presidio scartato perché".
+> - `bizquery-agent-gym/security/guardrail_provider.py` — ponte promptfoo→check_sql.
+> - `bizquery-agent-gym/security/promptfooconfig.yaml` — 13 casi (fonte unica di verità).
+> - `bizquery-agent-gym/security/README.md` — red-team + **mappa OWASP LLM Top 10**.
+> - `bizquery-agent-gym/tests/test_security_redteam.py` — 19 test (14 guardrail + 5 PII).
+> - `bizquery-agent-gym/requirements.txt` — +pyyaml.
+> - `.github/workflows/ci.yml` — step "Regressione di sicurezza" nel job `test`.
+>
+> **Verificato in locale**: 58 test verdi (39 esistenti + 19 sicurezza), zero Gemini/DB.
+> Il red-team dimostra prima (8 buchi) / dopo (0). ⚠️ Ambiente: pytest/pyyaml non erano
+> nel Python di sistema (installati ad-hoc); in CI li installa requirements.txt.
+>
+> **Prossimi passi security** (in `security/README.md`): garak containerizzato; promptfoo
+> su /ask end-to-end (quota piena); tautologie `tenant_id=tenant_id`; threat model LLM04
+> (data-poisoning via flywheel); LLM10 cost-guardian con EXPLAIN.
 
 > **Aggiornamento 2026-07-14 — EVALUATION COME SISTEMA + CI: FATTA. ✅**
 > Chiuso il blocco a ROI più alto (LLMOps). Cosa è stato costruito, testato e

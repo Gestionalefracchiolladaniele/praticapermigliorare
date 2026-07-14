@@ -27,3 +27,7 @@ mcp==1.28.1
 # dev / test
 pytest==8.3.4
 httpx==0.28.1
+# La suite di regressione di sicurezza (tests/test_security_redteam.py) legge i
+# casi red-team da security/promptfooconfig.yaml — la stessa config usata da
+# promptfoo. PyYAML serve per parsarla.
+pyyaml==6.0.2

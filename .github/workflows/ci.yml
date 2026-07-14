@@ -43,6 +43,11 @@ jobs:
       - name: Esegui i test mockati
         # Solo i test che NON toccano DB/rete: la nostra rete di sicurezza economica.
         run: pytest tests/test_judge.py tests/test_quality_gate.py tests/test_guardrail.py tests/test_tools.py tests/test_router.py -q
+      - name: Regressione di sicurezza (red-team dei guardrail)
+        # Ogni attacco trovato dal red-team (SQL injection/esfiltrazione/cross-tenant,
+        # PII masking) e' un test: se un buco si riapre, la CI diventa rossa e blocca
+        # il merge. Puro Python, zero Gemini/DB — gira a ogni push come gli altri.
+        run: pytest tests/test_security_redteam.py -q
 
   # --- Job 2: quality gate (eval reale su Postgres temporaneo) ---------------
   quality-gate:
