@@ -247,13 +247,15 @@ e i tool girano anche come server MCP indipendente.
 
 **LLMOps (banco di prova = BizQuery):**
 - [ ] Feedback online: endpoint `/feedback` che scrive uno Score Langfuse su una trace (Cap.4 lasciato)
-- [ ] LLM-as-judge multi-criterio nell'eval (faithfulness / groundedness / task-success / safety / cost)
-- [ ] Regression testing dell'agente in CI (soglia di score → blocca il merge se scende)
-- [ ] CI/CD GitHub Actions (l'unico pezzo L2 ancora mancante) + eval nella pipeline
+- [x] LLM-as-judge multi-criterio nell'eval (faithfulness / relevance / safety) ✅ (2026-07-14)
+- [x] Regression testing dell'agente in CI (soglia di score → blocca) ✅ (2026-07-14)
+- [~] CI/CD GitHub Actions: **CI FATTA** (test + quality gate). **CD (deploy auto) RIMANDATO**
+      di proposito alla versione advanced ECS (vedi nota sotto) — evita di costruire un
+      CD-via-SSH fragile e usa-e-getta sulla EC2 singola con IP dinamico.
 - [ ] Cost/latency dashboard per richiesta (Langfuse) + budget alert per tenant
 - [ ] BizQuery advanced (Terraform/ECS/RDS/Secrets/ALB) — vedi nota sopra
 
-**AI Security (banco di prova = attaccare i guardrail di BizQuery):**
+**AI Security (banco di prova = attaccare i guardrail di BizQuery):** ⬅️ PROSSIMA FASE
 - [ ] Mini red-team: bucare l'anti-injection e il PII masking, poi indurirli
 - [ ] Suite di test di jailbreak/prompt-injection contro l'agente (regressione di sicurezza)
 - [ ] Mappare BizQuery sull'OWASP Top 10 for LLMs (quali coperti, quali no)
@@ -262,11 +264,73 @@ e i tool girano anche come server MCP indipendente.
 
 > **Consiglio secco dato all'utente**: partire da **Evaluation come sistema**
 > (feedback online + LLM-judge + regression in CI) perché è il singolo blocco a ROI
-> più alto e spinge dritto verso il ruolo #1 (LLMOps).
+> più alto e spinge dritto verso il ruolo #1 (LLMOps). ✅ FATTO (2026-07-14, vedi stato sotto).
+> **Prossimo consiglio**: fase **AI Security** (red-team sui guardrail) — è evaluation
+> applicata alla sicurezza e la suite di attacco gira nella CI appena costruita.
 
 ---
 
 ## Stato avanzamento
+
+> **Aggiornamento 2026-07-14 — EVALUATION COME SISTEMA + CI: FATTA. ✅**
+> Chiuso il blocco a ROI più alto (LLMOps). Cosa è stato costruito, testato e
+> **committato+pushato** (repo `Gestionalefracchiolladaniele/praticapermigliorare`,
+> branch `main`, ultimo commit `4d9c6b5`):
+>
+> **1. LLM-as-judge multi-criterio** — `app/llm/judge.py`. Un secondo LLM (Gemini)
+> giudica la risposta su 3 criteri (faithfulness / relevance / safety) con UNA sola
+> chiamata (JSON con tutti i voti → risparmio free tier) e fallback deterministico
+> (se 429/JSON sporco non crasha; la safety la misura comunque via regex sull'email).
+> `eval/judge_evaluators.py`: 3 evaluator Langfuse che avvolgono il judge, con MEMO
+> (1 sola chiamata judge per caso anche con 3 criteri). Agganciato a `eval_langfuse.py`
+> col flag opt-in `--judge`. Il judge valuta la risposta NL VERA e mascherata (PII),
+> non un proxy.
+>
+> **2. Quality gate (regression testing)** — `eval/quality_gate.py` + `eval/thresholds.json`.
+> Gira l'eval e ritorna un EXIT CODE: 0=superato, 1=sotto soglia (blocca), 2=inconcludente.
+> Soglie versionate (execution_accuracy 0.8; judge faith/rel 0.8, safety 0.9;
+> min_evaluable_cases 8). `eval/eval.py` rifattorizzato: estratta `evaluate()` che
+> ritorna i numeri (accuracy + accuracy_evaluable + conteggi).
+>
+> **3. ROBUSTEZZA AI RATE-LIMIT (lezione chiave della sessione)** — i 429/503 del
+> free tier NON sono fallimenti di qualità: sono casi NON valutabili. Il gate ora li
+> marca `rate_limited`, li ESCLUDE dal conto, misura `accuracy_evaluable` sui soli
+> casi davvero valutati; se troppi cadono (< min_evaluable_cases) l'esito è
+> INCONCLUSIVO (exit 2), non rosso. Un fallimento di qualità VERO fa ancora fallire
+> (exit 1). Principio: *una CI che dipende da un servizio a rate-limit deve distinguere
+> "qualità regredita" da "servizio indisponibile"*.
+>
+> **4. CI GitHub Actions** — `.github/workflows/ci.yml`. Due job: `test` (pytest
+> mockato, 0 Gemini/0 DB, a ogni push) e `quality-gate` (eval reale su Postgres
+> usa-e-getta come service container, RLS attiva via ruolo `bizquery_app`, gira su
+> push a main / a mano). exit 2 del gate → warning + job verde (quota esaurita ≠ colpa
+> del codice). **Verificata dal vivo**: la CI gira, accende il DB, seeda, chiama Gemini;
+> oggi esito inconcludente SOLO perché la quota giornaliera Gemini (20 chiamate) era
+> esaurita — il sistema NON ha sbagliato nulla (tutti 429/503, zero SQL errati).
+> ⚠️ **Da riverificare dal vivo a quota ricaricata (24h)**: dovrebbe dare verde o un
+> fail *vero* su cui lavorare.
+>
+> **Test**: 15 verdi totali (9 judge + 6 gate), zero quota Gemini bruciata (Gemini
+> mockato via monkeypatch, come i test del grafo). Girano anche in CI nel job `test`.
+>
+> **Secret CI**: `GEMINI_API_KEY` messo su GitHub (Settings → Secrets → Actions).
+> ⚠️ Verificare che sia la chiave NUOVA rigenerata, non la vecchia compromessa
+> `AIzaSyBz...` (non confermato in questa sessione: la CI la usa e funziona, ma non
+> è stato verificato QUALE chiave sia). I 3 secret Langfuse sono opzionali (il gate
+> gira senza).
+>
+> **DECISIONE — CD (deploy automatico) RIMANDATO di proposito.** Non un "non fatto":
+> una scelta architetturale. Un CD-via-SSH sulla EC2 singola attuale sarebbe fragile
+> (IP dinamico → si romperebbe ai riavvii; servirebbe un Elastic IP) e usa-e-getta
+> (da buttare quando si passa a ECS). Il CD "fatto bene" nasce dentro la versione
+> **advanced ECS** (già prevista nella nota "BizQuery advanced"), con deploy nativo.
+> Quindi: la CI (verifica) c'è; il CD (deploy auto) si fa in advanced.
+>
+> **PROSSIMA FASE deciso**: **AI Security — red-team sui guardrail** (2° pezzo del
+> piano verticale eval→security→auth). Motivo: è evaluation applicata alla sicurezza,
+> e la suite di attacco (jailbreak/prompt-injection) girerà nella STESSA CI appena
+> costruita. Gran parte è puro Python (`app/guardrail.py`, `app/tools/mask_pii.py`) →
+> fattibile SENZA spendere quota Gemini. Vedi "Lista pratica → AI Security" sopra.
 
 > **Aggiornamento 2026-07-12 — deploy AWS COMPLETATO, L1 Step 7 CHIUSO. ✅**
 > L'app è LIVE su internet: `POST http://35.152.199.210:8000/ask` risponde da IP
@@ -374,7 +438,9 @@ e i tool girano anche come server MCP indipendente.
     Variabili `{{var}}` (sintassi Langfuse). Link prompt→run: `prompt_ref_*` nello
     `AgentState`/`GraphResponse`, popolato dai nodi. Hot-swap prompt senza redeploy
     verificato dal vivo. (Cap.3 del percorso a 8 capacità in `LEARN_LANGFUSE.md`.)
-  - ⬜ Manca: **CI/CD**.
+  - 🟢 **CI FATTA (2026-07-14)**: GitHub Actions con test + quality gate (regression).
+    Vedi "Stato avanzamento → Aggiornamento 2026-07-14" in cima. **CD (deploy auto)
+    rimandato di proposito** alla versione advanced ECS (non un CD-via-SSH usa-e-getta).
 - 🟡 **Livello 3 (v2)** — **gran parte del codice SCRITTA e verificata dal vivo
   (2026-07-07)**. Manca solo il data flywheel.
   - ✅ Tool `app/tools/run_query.py` (ri-valida col guardrail + esegue in RLS),
